@@ -53,6 +53,7 @@ let stopping = false;
 async function stop() {
   if (stopping) return;
   stopping = true;
+  try { lw.pipeline.endLive(); } catch { /* still close */ }
   await server.close();
   lw.store.close();
 }

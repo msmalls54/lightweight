@@ -13,19 +13,24 @@
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   // ------------------------------------------------------------ audio (voice-player.js is optional)
+  // ?mute=1: no voice at all (testing at the venue). Cue keys are still logged to the console.
+  const MUTED = new URLSearchParams(location.search).has("mute");
+  if (MUTED) document.title = "Lightweight (muted)";
   function speakFallback(text) {
-    if (!("speechSynthesis" in window)) return;
+    if (MUTED || !("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
     speechSynthesis.speak(new SpeechSynthesisUtterance(text));
   }
   function playClip(keys) { // a clip key or an array of keys stitched in order (e.g. ["rep_6", "delt_took_over"])
     if (!keys || (Array.isArray(keys) && !keys.length)) return;
+    if (MUTED) { console.info("[cue]", keys); return; }
     const A = window.LWAudio;
     if (A && typeof A.playClip === "function") { try { A.playClip(keys); } catch (e) { console.warn("playClip failed", e); } return; }
     speakFallback([].concat(keys).map(k => k.replace(/_/g, " ")).join(". "));
   }
   function say(text) {
     if (!text) return;
+    if (MUTED) { console.info("[say]", text); return; }
     const A = window.LWAudio;
     if (A && typeof A.say === "function") { try { A.say(text); } catch (e) { console.warn("say failed", e); } return; }
     speakFallback(text);
@@ -367,7 +372,7 @@
   }
   if (!hookMusic()) window.addEventListener("load", hookMusic);
   // Browsers only start Web Audio after a user gesture: unlock on the first click/key.
-  const unlock = () => { try { window.LWAudio?.unlock?.(); } catch { /* ignore */ } };
+  const unlock = () => { if (!MUTED) try { window.LWAudio?.unlock?.(); } catch { /* ignore */ } };
   window.addEventListener("pointerdown", unlock, { once: true });
   window.addEventListener("keydown", unlock, { once: true });
   if (window.__lwNoVoice) console.info("voice-player.js not found; using browser speech as a fallback.");

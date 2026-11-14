@@ -142,17 +142,18 @@ export function registerTools(server: MCPServer, store: Store, pipeline: Pipelin
 
   server.tool({
     name: "update_plan",
-    description: "Change today's planned targets in data/coach/plan.json, e.g. 'bump band curls to 12 reps'. Matches today's entry by exercise name (adds one if new). Only changes what you pass. The plan keeps weights constant unless the user explicitly asks.",
+    description: "Change today's planned reps/sets/targets in data/coach/plan.json, e.g. 'bump band curls to 12 reps'. Matches today's entry by exercise name (adds one if new). Only changes what you pass. Load is fixed (35 lb dumbbells) and cannot be changed here: progress means more clean reps, not more weight.",
     schema: z.object({
       exercise: z.string().trim().min(1).max(60),
       variant: z.enum(["standing", "preacher", "hammer"]).optional(),
       sets: z.number().int().min(1).max(20).optional(),
       target_reps: z.number().int().min(1).max(50).optional(),
-      load_lb: z.number().min(0).max(500).optional(),
       note: z.string().max(200).optional(),
+      load_lb: z.unknown().optional().describe("Not allowed: load is fixed at 35 lb. Passing it is refused."),
     }),
     annotations: RW,
   }, async a => {
+    if (a.load_lb !== undefined) return object({ ok: false, error: "Load is fixed at 35 lb (plan rule). update_plan changes reps, sets and targets only." });
     try {
       const file = resolve(COACH_DIR, "plan.json");
       const plan = JSON.parse(readFileSync(file, "utf8")) as { today?: { sessions?: Record<string, unknown>[] } };
@@ -162,7 +163,7 @@ export function registerTools(server: MCPServer, store: Store, pipeline: Pipelin
       let entry = plan.today.sessions.find(s => String(s.exercise ?? "").toLowerCase() === key);
       const before = entry ? { ...entry } : null;
       if (!entry) { entry = { exercise: a.exercise }; plan.today.sessions.push(entry); }
-      for (const k of ["variant", "sets", "target_reps", "load_lb", "note"] as const) if (a[k] !== undefined) entry[k] = a[k];
+      for (const k of ["variant", "sets", "target_reps", "note"] as const) if (a[k] !== undefined) entry[k] = a[k];
       const tmp = `${file}.tmp`;
       writeFileSync(tmp, JSON.stringify(plan, null, 2) + "\n");
       renameSync(tmp, file);

@@ -82,8 +82,9 @@ export function compareArms(store: Store, sessionId?: string) {
   const d = sessionDetail(store, sessionId);
   if (!d) return null;
   const rows = d.sets.filter(s => s.view.arms.length === 2 && s.reps.length).map(s => {
+    // Every rep event carries all 4 channels (a bilateral rep is ONE event labeled with the cheating arm).
     const right = s.reps.filter(r => r.arm === "R"), left = s.reps.filter(r => r.arm === "L");
-    const rBi = avg(right.map(r => r.mean_pct[0])), lBi = avg(left.map(r => r.mean_pct[2]));
+    const rBi = avg(s.reps.map(r => r.mean_pct[0])), lBi = avg(s.reps.map(r => r.mean_pct[2]));
     const share = rBi + lBi > 0 ? rBi / (rBi + lBi) : null;
     return { set_no: s.view.set_no, exercise: s.view.exercise, r_biceps_mean: r2(rBi), l_biceps_mean: r2(lBi), r_share: share === null ? null : r2(share),
       flagged: share !== null && (share < 0.4 || share > 0.6), weaker: share === null ? null : share < 0.5 ? "right" : share > 0.5 ? "left" : "even",
