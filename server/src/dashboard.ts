@@ -8,6 +8,7 @@ import type { Store } from "./store.js";
 import type { Hub } from "./hub.js";
 import { captureSchema, sessionStartSchema, setStartSchema } from "./schemas.js";
 import { PUBLIC_DIR, REPO_ROOT } from "./paths.js";
+import { workoutToday } from "./workout.js";
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -56,6 +57,10 @@ export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store
     return { speaker: b.client_id };
   }));
   app.get("/api/state", c => c.json(pipeline.status()));
+  app.get("/workout/today", c => {
+    const ids = pipeline.activeIds;
+    return c.json(workoutToday(store, c.req.query("person") || ids.person, ids.session, ids.set));
+  });
   app.get("/sessions", c => c.json({ sessions: store.listSessions(40) }));
   app.get("/health", c => c.json({ ok: true, service: "lightweight", ...pipeline.status() }));
 
