@@ -1,5 +1,6 @@
 // batch -> store -> engine.ingest -> events -> SSE (+ pickCue). Also sets, calibration and replay.
-import { Engine, pickCueSequence, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, writeTodayHistory, speak, spokenPart,
+import { Engine, pickCueSequence, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, summarizeSession, writeTodayHistory, speak, spokenPart,
+  type SessionSummary, type LoggedLift,
   type Arm, type Batch, type Calibration, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "./modules.js";
 import type { Store, SessionKind, EventRow } from "./store.js";
 import type { Hub } from "./hub.js";
@@ -216,6 +217,7 @@ export class Pipeline {
       this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
     }
     await detail;
+    if (sess.kind === "live" && !sess.isWalkUp) void this.refreshWorkoutSummary(sess.person);
   }
 
   // ------------------------------------------------------------------ sessions + sets
@@ -366,7 +368,32 @@ export class Pipeline {
   requestCalibration() { this.hub.send({ type: "calibrate_request" }); }
   get sessionPerson() { return this.active?.person ?? "Mike"; }
   /** Tell dashboards to refresh the workout timeline (e.g. a lift was logged without sensors). */
-  notifyWorkout() { this.hub.send({ type: "workout" }); }
+  notifyWorkout(person = this.sessionPerson) { this.hub.send({ type: "workout" }); void this.refreshWorkoutSummary(person); }
+
+  // ------------------------------------------------------------------ workout summary (④ summarizeSession)
+  private summaryCache = new Map<string, { key: string; value: Promise<SessionSummary> }>();
+  /** Today's workout for a person, summarised by the coach. Cached per (person, last finished set, logged count). */
+  workoutSummary(person: string): Promise<SessionSummary> {
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const since = midnight.toISOString();
+    const logged = this.store.loggedToday(person, since);
+    const key = `${person}|${this.store.lastSetIdToday(person, since) ?? "-"}|${logged.length}`;
+    const hit = this.summaryCache.get(person);
+    if (hit && hit.key === key) return hit.value;
+    const ctx = buildCoachContext({ person, todaySets: this.store.todaySetEnds(person), setMeta: this.store.todaySetMeta(person) });
+    const lifts: LoggedLift[] = logged.map(l => ({ exercise: l.exercise, variant: l.variant, load_lb: l.load_lb, sets: l.sets, reps: l.reps, note: l.note }));
+    const value = withTimeout(summarizeSession(ctx, { logged: lifts }), 15_000);
+    value.catch(() => this.summaryCache.delete(person)); // never cache a timeout
+    this.summaryCache.set(person, { key, value });
+    return value;
+  }
+  /** Recompute after a set or a logged lift and push it to the dashboards. */
+  async refreshWorkoutSummary(person: string) {
+    try {
+      const summary = await this.workoutSummary(person);
+      this.hub.send({ type: "workout_summary", person, summary });
+    } catch (err) { console.error("[coach] summarizeSession failed:", errMsg(err)); }
+  }
   /** For the workout timeline: the session on screen and its running set. */
   get activeIds() { const s = this.active; return { session: s?.id, set: s?.set?.set_id, person: s && !s.isWalkUp ? s.person : "Mike" }; }
 

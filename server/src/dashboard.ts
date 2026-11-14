@@ -61,6 +61,11 @@ export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store
     const ids = pipeline.activeIds;
     return c.json(workoutToday(store, c.req.query("person") || ids.person, ids.session, ids.set));
   });
+  app.get("/workout/summary", async c => {
+    const person = c.req.query("person") || pipeline.activeIds.person;
+    try { return c.json({ ok: true, person, summary: await pipeline.workoutSummary(person) }); }
+    catch (e) { return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 503); }
+  });
   app.get("/sessions", c => c.json({ sessions: store.listSessions(40) }));
   app.get("/health", c => c.json({ ok: true, service: "lightweight", ...pipeline.status() }));
 
