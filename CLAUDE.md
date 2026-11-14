@@ -171,6 +171,9 @@ Muscle-map widget: front body outline; tracked muscles (L/R biceps, L/R front de
 
 Sponsors: **Gemini/DeepMind** (agent brain **and** voice via Gemini TTS; stretch: phone camera so it sees + feels the rep). No ElevenLabs at this event. Stripe optional: test-mode "$1 to challenge, beat it and get $5 back." Skip Brex.
 
+## Submission (VexoHacks, from the organizers' slide)
+Submit **before 6 PM PST** (Nov 14). Checklist: **GitHub** repo, **README**, **video demo**, **Devpost** (link released closer to the deadline). Must show a **working demo in person**. The event is **VexoHacks**: Vexo (the AI bracelet) is the host, so a Vexo tie-in is worth showing.
+
 ## Priorities (cut from the bottom)
 - **P0:** firmware streaming 4ch -> server -> SQLite; calibration; rep detection; cheat flag; pre-generated voice call-out; dashboard bars; pre-recorded fallback session.
 - **P1:** muscle-map widget via MCP; Gemini summaries/Q&A; music ducking; LED matrix bars; imbalance.
