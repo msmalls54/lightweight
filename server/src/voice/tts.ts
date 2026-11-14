@@ -41,13 +41,15 @@ export function geminiSynth(o: GeminiSynthOptions): Synth {
                 {
                   type: "text",
                   text,
-                  annotations: [{ type: "speech_metadata", style: opts?.style ?? VOICE_STYLE }],
+                  // 3.1 TTS doesn't take the style annotation either.
+                  ...(/3\.1-flash-tts/.test(model) ? {} : { annotations: [{ type: "speech_metadata", style: opts?.style ?? VOICE_STYLE }] }),
                 },
               ],
             },
           ],
-          // Ask for raw PCM and wrap it ourselves: a header we control.
-          response_format: { type: "audio", mime_type: "audio/l16" },
+          // Ask for raw PCM and wrap it ourselves: a header we control. gemini-3.1-flash-tts-preview
+          // rejects an explicit mime type (400) but returns audio/l16 24 kHz by default.
+          response_format: /3\.1-flash-tts/.test(model) ? { type: "audio" } : { type: "audio", mime_type: "audio/l16" },
           generation_config: { speech_config: [{ voice: o.voice ?? voiceId() }] },
         };
         // Cast: the SDK's interaction param types are a wide union; the shape matches the v1beta docs.
