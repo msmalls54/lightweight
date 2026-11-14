@@ -44,6 +44,18 @@ export interface RepThresholds {
   flagWithoutReference: boolean;
   /** No reference yet (and flagWithoutReference): flag an up-phase delt/biceps ratio above this. */
   fallbackUpRatio: number;
+  /** Delt %MVC at or above this counts as saturated (pinned at the ceiling). */
+  satLevel: number;
+  /** Reference delt peak at or above this = "high baseline": no peak/level rules, larger jumps needed. */
+  highBaselinePeak: number;
+  highBaselineUpMult: number;
+  highBaselineUpJump: number;
+  highBaselineShareJump: number;
+  /** Fatigue drift: the adaptive reference is the median of the arm's last N non-cheat reps. */
+  adaptReps: number;
+  /** Flagged only against the first reps = loose, if the up ratio is still this far above the recent trend. */
+  looseUpMult: number;
+  looseUpJump: number;
   /** Cheat: delt_share above the clean reference by more than this. */
   deltShareJump: number;
   /** Cheat: delt mean %MVC at least this many times the reference... */
@@ -134,6 +146,14 @@ export const DEFAULT_CONFIG: EngineConfig = {
   upRatioJump: 0.15,
   flagWithoutReference: false,
   fallbackUpRatio: 1.2,
+  satLevel: 0.95,
+  highBaselinePeak: 0.9,
+  highBaselineUpMult: 1.6,
+  highBaselineUpJump: 0.3,
+  highBaselineShareJump: 0.25,
+  adaptReps: 3,
+  looseUpMult: 1.25,
+  looseUpJump: 0.1,
   deltShareJump: 0.15,
   deltMeanRatio: 1.5,
   deltMeanJump: 0.15,
@@ -197,6 +217,14 @@ export function thresholdsFor(cfg: EngineConfig, variant: Variant): RepThreshold
     upRatioJump: o.upRatioJump ?? cfg.upRatioJump,
     flagWithoutReference: o.flagWithoutReference ?? cfg.flagWithoutReference,
     fallbackUpRatio: o.fallbackUpRatio ?? cfg.fallbackUpRatio,
+    satLevel: o.satLevel ?? cfg.satLevel,
+    highBaselinePeak: o.highBaselinePeak ?? cfg.highBaselinePeak,
+    highBaselineUpMult: o.highBaselineUpMult ?? cfg.highBaselineUpMult,
+    highBaselineUpJump: o.highBaselineUpJump ?? cfg.highBaselineUpJump,
+    highBaselineShareJump: o.highBaselineShareJump ?? cfg.highBaselineShareJump,
+    adaptReps: o.adaptReps ?? cfg.adaptReps,
+    looseUpMult: o.looseUpMult ?? cfg.looseUpMult,
+    looseUpJump: o.looseUpJump ?? cfg.looseUpJump,
     deltShareJump: o.deltShareJump ?? cfg.deltShareJump,
     deltMeanRatio: o.deltMeanRatio ?? cfg.deltMeanRatio,
     deltMeanJump: o.deltMeanJump ?? cfg.deltMeanJump,
