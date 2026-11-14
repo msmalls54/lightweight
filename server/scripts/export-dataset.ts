@@ -1,8 +1,9 @@
-// Export the Lightweight EMG curl dataset (v0) for a later Gemma fine-tune. No training here.
+// Export the Lightweight EMG curl dataset (v1) for a Gemma fine-tune and a classifier baseline.
 //
-//   cd server && npx tsx scripts/export-dataset.ts                 # real CSVs + synthetic -> data/dataset/v0/
-//   cd server && npx tsx scripts/export-dataset.ts --db lightweight.db   # also add reps from a server SQLite DB
-//   options: --out <dir> (default ../data/dataset/v0), --no-synthetic
+//   cd server && npx tsx scripts/export-dataset.ts --db <copy of data/lightweight.sqlite>
+//       real CSVs + LIVE 200 Hz sessions (replayed from stored batches with the current engine) + synthetic
+//   options: --out <dir> (default ../data/dataset/v1), --no-synthetic
+//   Always point --db at a COPY: node:sqlite may checkpoint the WAL when it opens the file.
 //
 // Rule kept from CLAUDE.md: CODE DECIDES, THE MODEL ONLY PHRASES. Every verdict in these files comes
 // from the signal engine (`engine_flag`) or from the person's instruction during the recording
@@ -11,18 +12,19 @@
 // (CLIPS text of pickCueSequence, or fallbackSummary). No network, no Gemini, no audio.
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Engine, DEFAULT_CONFIG, type Batch, type Calibration, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "../src/engine/index.js";
 import { synth, toBatches, presets, type SynthRep } from "../src/engine/fixtures.js";
-import { pickCue, pickCueSequence, pickSetEndCue, setFacts, fallbackSummary, CUE_CONFIG } from "../src/coach/index.js";
+import { pickCue, pickCueSequence, pickSetEndCue, setFacts, repFacts, fallbackSummary, mentionsRawShare, scrubSnitch, CUE_CONFIG } from "../src/coach/index.js";
 import { CLIPS } from "../src/voice/index.js"; // text only: never call initVoice/speak here
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
 const RAW = path.join(REPO, "data/coach/history/raw");
 const WINDOW_LEN = 128;
-const DATASET_VERSION = "v0";
+const DATASET_VERSION = "v1";
 
 // ------------------------------------------------------------------------------------------ args
 const argv = process.argv.slice(2);
@@ -36,7 +38,8 @@ const WITH_SYNTH = !argv.includes("--no-synthetic");
 
 // ------------------------------------------------------------------------------------------ types
 type Source = "real" | "synthetic";
-type Instructed = "strict" | "swing";
+/** "loose" = Mike's own word for a rep that was "kind of activated, going fast": neither strict nor an intended swing. */
+type Instructed = "strict" | "swing" | "loose";
 
 interface Sample { t: number; pct: number[] }
 
@@ -64,7 +67,8 @@ interface SetRun {
   repEventKeys: Set<string>; // reps that got their own "rep" event
   samples: Sample[]; // the %MVC timeline fed to the engine during this set (for windows)
   labelAt: (t: number) => string | null; // raw phase label at engine time t (real data)
-  repInstruction?: (r: RepEvent) => { label: Instructed | null; note: string | null }; // synthetic ground truth
+  repInstruction?: (r: RepEvent) => { label: Instructed | null; note: string | null }; // synthetic or human per-rep labels
+  labelSource?: "phase_instruction" | "generator_intent" | "human_per_rep";
 }
 
 // ------------------------------------------------------------------------------------------ helpers
@@ -281,7 +285,7 @@ function runSynthetic(): SetRun[] {
       const syn = synth(ss.reps, { hz: 200, rest, mvc, seed: sess.seed + k });
       const ctx: SetContext = { session_id: sess.id, set_id: ss.name, person: "synthetic", exercise: sess.exercise, variant: sess.variant, load_lb: sess.load_lb ?? undefined, arms: sess.arms };
       e.startSet(ctx);
-      const run: SetRun = { meta, set_index: k + 1, set_label: ss.name, instructed: null, set: null as unknown as SetEndEvent, repEventKeys: new Set(), samples: [], labelAt: () => ss.name };
+      const run: SetRun = { meta, set_index: k + 1, set_label: ss.name, instructed: null, set: null as unknown as SetEndEvent, repEventKeys: new Set(), samples: [], labelAt: () => ss.name, labelSource: "generator_intent" };
       let ended: SetEndEvent | null = null;
       const setT0 = t0;
       for (const b of toBatches(syn.ch, syn.hz, { t0_ms: t0, device: sess.id })) feed(e, b, pct, clock, run.samples, (se) => (ended = se), run.repEventKeys);
@@ -350,22 +354,53 @@ function cueFlags(r: RepEvent, variant: Variant) {
 
 const f2 = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? "n/a" : (Math.round(x * 100) / 100).toFixed(2));
 
+const sideWord = (a: "R" | "L") => (a === "R" ? "right" : "left");
+const NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
+const repWord = (n: number) => (n >= 0 && n <= 20 ? NUM_WORDS[n] : String(n));
+const xText = (x: number) => (x >= 10 ? String(Math.round(x)) : (Math.round(x * 10) / 10).toString());
+
+/** Prompt for one rep. Wording rules (Nov 14): no raw delt share, the front delt (cheat check) is
+ *  described relative to the lifter's OWN clean reps, never "snitch". */
 function repPrompt(meta: RecordingMeta, setIndex: number, r: RepEvent): string {
-  const bi = r.arm === "L" ? 2 : 0, de = r.arm === "L" ? 3 : 1;
+  const bi = r.arm === "L" ? 2 : 0;
   const fl = cueFlags(r, meta.variant);
+  const f = repFacts(r, meta.variant);
+  const x = f.up_delt_x_clean;
   return [
-    "You are a blunt gym coach speaking through a speaker mid-set. The sensor code has already judged this curl rep. Say the call-out in one short line. Do not re-judge the rep; use the code's verdict as given.",
-    `Exercise: ${meta.exercise} (${meta.variant}), load: ${meta.load_desc}. Arm: ${r.arm}. Set ${setIndex}, rep ${r.rep}.`,
-    `Numbers (%MVC, relative to this person's calibration): biceps peak ${f2(r.peak_pct[bi])}, mean ${f2(r.mean_pct[bi])}; front delt peak ${f2(r.peak_pct[de])}, mean ${f2(r.mean_pct[de])}; delt share ${f2(r.delt_share)} (clean reference ${f2(r.baseline_delt_share)}); up-phase delt/biceps ${f2(r.up_delt_ratio)} (reference ${f2(r.baseline_up_delt_ratio ?? null)}); R/L biceps share ${f2(r.r_share)}; up ${Math.round(r.up_ms)} ms, down ${Math.round(r.down_ms)} ms.`,
-    `Code verdict: ${r.cheat ? `CHEAT (${r.cheat_reason === "delt_peak" ? "delt peak too high" : "delt took over"})` : "clean"}; imbalance: ${fl.imbalance}; tempo: ${fl.tempo}.`,
+    "You are a blunt gym coach speaking through a speaker mid-set. The sensor code has already judged this curl rep. Say the call-out in one short line (under 20 words). Do not re-judge the rep; use the code's verdict as given. Talk about the shoulder relative to the lifter's own clean reps; never quote a raw percentage.",
+    `Exercise: ${meta.exercise} (${meta.variant}), load: ${meta.load_desc}. Arm: ${r.arm} (${sideWord(r.arm)}). Set ${setIndex}, rep ${r.rep}.`,
+    `Numbers: biceps peak ${f2(r.peak_pct[bi])} of calibrated max; front delt (cheat check) on the way up: ${x == null ? "no clean reference yet (still learning this lifter's clean rep)" : `${xText(x)}x this lifter's clean reps`}; up ${Math.round(r.up_ms)} ms.`,
+    `Code verdict: ${r.cheat ? "CHEAT (shoulder took over)" : "clean"}${f.label === "big_swing" ? ", a full swing" : f.label === "near_miss" ? ", but close to the cheat line" : ""}; imbalance: ${fl.imbalance}; tempo: ${fl.tempo}.`,
   ].join("\n");
+}
+
+/** The target line for a rep, built by code from the same verdict (the model only learns to phrase it). */
+function repLine(r: RepEvent, variant: Variant): string {
+  const f = repFacts(r, variant);
+  const fl = cueFlags(r, variant);
+  const n = `Rep ${repWord(r.rep)}`;
+  const x = f.up_delt_x_clean;
+  if (r.cheat) {
+    if (variant === "preacher") return `${n}: cheat. Elbows in, keep them pinned.`;
+    if (x == null) return `${n}: cheat. Your ${sideWord(r.arm)} shoulder took over.`;
+    return `${n}: cheat. Your ${sideWord(r.arm)} shoulder did ${xText(x)} times its normal share on the way up${f.label === "big_swing" ? ", that's a swing" : ""}.`;
+  }
+  if (fl.imbalance === "left side slacking") return `${n}. Left side's slacking.`;
+  if (fl.imbalance === "right side slacking") return `${n}. Right side's slacking.`;
+  if (fl.tempo === "too fast up") return `${n}. Clean, but slow it down.`;
+  if (f.label === "near_miss") return `${n}. Clean, but your shoulder is creeping up.`;
+  return `${n}. Clean.`;
 }
 
 function setPrompt(meta: RecordingMeta, setIndex: number, set: SetEndEvent): string {
   const f = setFacts(set);
-  const facts = { ...f, reps: f.reps.map(({ rep, arm, cheat, delt_share, biceps_mean_pct_mvc, delt_peak_pct_mvc, r_share, up_ms }) => ({ rep, arm, cheat, delt_share, biceps_mean_pct_mvc, delt_peak_pct_mvc, r_share, up_ms })) };
+  const facts = {
+    total_reps: f.total_reps, cheats: f.cheats, first_cheat_rep: f.first_cheat_rep, cheat_pattern: f.cheat_pattern,
+    reference_status: f.reference_status, decision: set.decision?.next,
+    reps: f.reps.map(({ rep, arm, verdict, label, up_delt_x_clean, up_ms }) => ({ rep, arm, verdict, label, shoulder_up_x_clean: up_delt_x_clean, up_ms })),
+  };
   return [
-    "You are a blunt gym coach. The set just ended. The sensor code has already counted the reps, flagged the cheats and decided what happens next. Sum it up in one or two short spoken sentences. Do not re-judge any rep and do not change the weight.",
+    "You are a blunt gym coach. The set just ended. The sensor code has already counted the reps, flagged the cheats and decided what happens next. Sum it up in one or two short spoken sentences. Do not re-judge any rep and do not change the weight. Talk about the shoulder relative to the lifter's own clean reps (shoulder_up_x_clean = times its normal share on the way up); never quote a raw percentage.",
     `Exercise: ${meta.exercise} (${meta.variant}), load: ${meta.load_desc}. Set ${setIndex}.`,
     `Code facts (JSON): ${JSON.stringify(facts)}`,
   ].join("\n");
@@ -385,13 +420,14 @@ function emit(runs: SetRun[], out: Out) {
         id, recording_id: m.recording_id, source: m.source, person: m.person, session_id: m.session_id,
         exercise: m.exercise, variant: m.variant, load_lb: m.load_lb, load_desc: m.load_desc, arms_on: m.arms_on,
         arm: r.arm, set_index: run.set_index, set_label: run.set_label, rep: r.rep,
-        label_instructed: lab.label, label_note: lab.note,
+        label_instructed: lab.label, label_note: lab.note, label_source: lab.label == null ? null : run.labelSource ?? "phase_instruction",
         engine_flag: r.cheat, engine_reason: r.cheat_reason,
       };
       out.reps.push({
         ...base,
         phase_label_at_biceps_peak: lab.phase_at_peak,
-        label_engine_agree: lab.label == null ? null : (lab.label === "swing") === r.cheat,
+        label_engine_agree: lab.label == null || lab.label === "loose" ? null : (lab.label === "swing") === r.cheat,
+        up_delt_x_clean: repFacts(r, m.variant).up_delt_x_clean,
         start_ms: r.start_ms, end_ms: r.end_ms, duration_ms: r.end_ms - r.start_ms, up_ms: r.up_ms, down_ms: r.down_ms,
         peak_pct: r.peak_pct, mean_pct: r.mean_pct,
         delt_share: r.delt_share, baseline_delt_share: r.baseline_delt_share,
@@ -412,79 +448,129 @@ function emit(runs: SetRun[], out: Out) {
       }
       const keys = pickCueSequence(r, { variant: m.variant });
       out.sft.push({
-        id: `${id}/cue`, kind: "rep_cue", source: m.source, recording_id: m.recording_id, engine_flag: r.cheat, cue_keys: keys,
+        id: `${id}/cue`, kind: "rep_cue", source: m.source, recording_id: m.recording_id, rep: r.rep, engine_flag: r.cheat,
+        label_instructed: lab.label, cue_keys: keys, voice_clip_text: cueText(keys),
         messages: [
           { role: "user", content: repPrompt(m, run.set_index, r) },
-          { role: "model", content: cueText(keys) },
+          { role: "model", content: repLine(r, m.variant) },
         ],
       });
     }
     out.sft.push({
       id: `${m.recording_id}/set${run.set_index}/summary`, kind: "set_summary", source: m.source, recording_id: m.recording_id,
+      cheat_reps: run.set.reps.filter((x) => x.cheat).map((x) => x.rep), total_reps: run.set.reps.length,
       cheats: run.set.cheats, decision: run.set.decision.next, set_end_cue: pickSetEndCue(run.set),
       messages: [
         { role: "user", content: setPrompt(m, run.set_index, run.set) },
-        { role: "model", content: fallbackSummary(run.set) },
+        { role: "model", content: scrubSnitch(fallbackSummary(run.set)) },
       ],
     });
   }
 }
 
-// ------------------------------------------------------------------------------------------ optional: SQLite
-async function emitDb(dbPath: string, out: Out) {
-  const { default: Database } = await import("better-sqlite3");
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  const sessions = db.prepare("SELECT session_id, person, is_walkup, kind, calibration FROM sessions WHERE kind != 'replay' ORDER BY started_at").all() as {
-    session_id: string; person: string; is_walkup: number; kind: string; calibration: string | null;
+// ------------------------------------------------------------------------------------------ live sessions (SQLite)
+// Human per-rep labels from Mike (Nov 14), keyed by session and set_no. Rep numbers are the ones he saw LIVE
+// (stored `reps` table, older engine); they are matched to today's re-detected reps by time overlap.
+const HUMAN_LABELS: Record<string, Record<number, { swing?: number[]; loose?: number[]; rest: Instructed; note: string }>> = {
+  "s-1114-122526-r82": { 1: { swing: [4, 8], loose: [5], rest: "strict", note: "Mike: reps 4 and 8 were intended swings, rep 5 'kind of activated, going fast', the rest strict" } },
+  "s-1114-123449-zdw": { 1: { rest: "strict", note: "Mike: 3 strict reps" } },
+};
+
+interface StoredRep { rep: number; start_ms: number; end_ms: number; set_no: number }
+interface ArmCtx { exercise: string; variant: Variant; load_lb?: number; arms: ("R" | "L")[]; auto_next?: boolean }
+
+/**
+ * Replays every kind='live' session's stored 200 Hz batches through the CURRENT engine, exactly the way the
+ * server ran it: a set is armed right after the batch recorded in each `set_start` session event (its payload
+ * is the set context), ended after `set_stop`, and re-armed after an automatic set end when `auto_next` is on.
+ * (`sets.started_at` is NOT used: it is written around the first rep, so a replay from it starts mid-rep.)
+ * Fake/replay sessions are skipped. Human labels are matched to re-detected reps by time overlap with the reps
+ * the server stored live (older engine), whose numbers are the ones Mike saw.
+ */
+function runLive(dbPath: string): SetRun[] {
+  const db = new DatabaseSync(dbPath);
+  const out: SetRun[] = [];
+  const sessions = db.prepare("SELECT session_id, person, is_walkup, calibration FROM sessions WHERE kind = 'live' ORDER BY started_at").all() as unknown as {
+    session_id: string; person: string; is_walkup: number; calibration: string | null;
   }[];
   let walkup = 0;
   for (const s of sessions) {
-    const person = s.kind === "fake" ? "synthetic" : s.is_walkup ? `walkup-${++walkup}` : s.person.toLowerCase();
-    const source: Source = s.kind === "live" ? "real" : "synthetic";
-    const cal = s.calibration ? (JSON.parse(s.calibration) as Calibration) : null;
-    const sets = db.prepare("SELECT set_id, set_no, ctx, summary FROM sets WHERE session_id=? ORDER BY set_no").all(s.session_id) as {
-      set_id: string; set_no: number; ctx: string; summary: string | null;
+    const events = db.prepare("SELECT kind, after_batch_id, payload FROM session_events WHERE session_id = ? AND kind IN ('set_start', 'set_stop') ORDER BY event_id").all(s.session_id) as unknown as {
+      kind: string; after_batch_id: number; payload: string;
     }[];
-    for (const t of sets) {
-      const ctx = JSON.parse(t.ctx) as SetContext;
-      let set: SetEndEvent | null = t.summary ? (JSON.parse(t.summary) as SetEndEvent) : null;
-      const repRows = (db.prepare("SELECT payload FROM reps WHERE set_id=? ORDER BY rep").all(t.set_id) as { payload: string }[]).map((x) => JSON.parse(x.payload) as RepEvent);
-      const reps = set?.reps?.length ? set.reps : repRows;
-      if (!reps.length) continue;
-      const meta: RecordingMeta = {
-        recording_id: `db:${s.session_id}`, source, person, session_id: s.session_id, exercise: ctx.exercise, variant: ctx.variant,
-        load_lb: ctx.load_lb ?? null, load_desc: ctx.load_lb ? `${ctx.load_lb} lb` : "unknown", arms_on: ctx.arms, sample_hz: 200,
-        calibration: { rest: cal?.rest ?? [], mvc: cal?.mvc ?? [], note: "stored session calibration" }, file: dbPath,
-      };
-      const evKeys = new Set(repRows.map(repKey));
-      for (const r of reps) {
-        const id = `${meta.recording_id}/set${t.set_no}/rep${r.rep}-${r.arm}`;
-        out.reps.push({
-          id, recording_id: meta.recording_id, source, person, session_id: s.session_id, exercise: ctx.exercise, variant: ctx.variant,
-          load_lb: meta.load_lb, load_desc: meta.load_desc, arms_on: ctx.arms, arm: r.arm, set_index: t.set_no, set_label: t.set_id, rep: r.rep,
-          label_instructed: null, label_note: "live session: no human label, engine flag only",
-          engine_flag: r.cheat, engine_reason: r.cheat_reason, phase_label_at_biceps_peak: null, label_engine_agree: null,
-          start_ms: r.start_ms, end_ms: r.end_ms, duration_ms: r.end_ms - r.start_ms, up_ms: r.up_ms, down_ms: r.down_ms,
-          peak_pct: r.peak_pct, mean_pct: r.mean_pct, delt_share: r.delt_share, baseline_delt_share: r.baseline_delt_share,
-          up_delt_ratio: r.up_delt_ratio ?? null, baseline_up_delt_ratio: r.baseline_up_delt_ratio ?? null, r_share: r.r_share,
-          had_rep_event: evKeys.has(repKey(r)), sample_hz: meta.sample_hz, calibration: { rest: meta.calibration.rest, mvc: meta.calibration.mvc },
-        });
-        const keys = pickCueSequence(r, { variant: ctx.variant });
-        out.sft.push({
-          id: `${id}/cue`, kind: "rep_cue", source, recording_id: meta.recording_id, engine_flag: r.cheat, cue_keys: keys,
-          messages: [{ role: "user", content: repPrompt(meta, t.set_no, r) }, { role: "model", content: cueText(keys) }],
-        });
+    if (!events.some((e) => e.kind === "set_start")) continue;
+    const stored = (db.prepare("SELECT r.payload AS payload, s.set_no AS set_no FROM reps r JOIN sets s ON r.set_id = s.set_id WHERE r.session_id = ?").all(s.session_id) as unknown as { payload: string; set_no: number }[])
+      .map((x) => ({ ...(JSON.parse(x.payload) as StoredRep), set_no: x.set_no }));
+    const batches = db.prepare("SELECT batch_id, payload FROM batches WHERE session_id = ? ORDER BY batch_id").all(s.session_id) as unknown as { batch_id: number; payload: string }[];
+    const cal: Calibration = s.calibration ? (JSON.parse(s.calibration) as Calibration) : { rest: [550, 550, 550, 550], mvc: [14960, 14960, 14960, 14960], ok: true, problems: [] };
+    const person = s.is_walkup ? `walkup-${++walkup}` : s.person.toLowerCase();
+    const human = HUMAN_LABELS[s.session_id] ?? {};
+    // Same engine settings as the live server: 30 s auto-end; everything else = current defaults.
+    const e = new Engine({ autoEndMs: 30_000 });
+    e.setCalibration(cal);
+    const clock = { lastT: -Infinity };
+    let setNo = 0;
+    let armed: ArmCtx | null = null;
+    let cur: { run: SetRun; pct: (raw: number, c: number) => number } | null = null;
+
+    const labelOf = (r: RepEvent): { label: Instructed | null; note: string | null } => {
+      let best: StoredRep | null = null, bestOv = 0;
+      for (const sr of stored) {
+        const ov = Math.min(r.end_ms, sr.end_ms) - Math.max(r.start_ms, sr.start_ms);
+        if (ov > bestOv) { bestOv = ov; best = sr; }
       }
-      if (set && set.decision) {
-        out.sft.push({
-          id: `${meta.recording_id}/set${t.set_no}/summary`, kind: "set_summary", source, recording_id: meta.recording_id,
-          cheats: set.cheats, decision: set.decision.next, set_end_cue: pickSetEndCue(set),
-          messages: [{ role: "user", content: setPrompt(meta, t.set_no, set) }, { role: "model", content: fallbackSummary(set) }],
-        });
+      const h = best ? human[best.set_no] : undefined;
+      if (!best || !h) return { label: null, note: best ? `live set without a human label (live set ${best.set_no}, rep ${best.rep}): engine flag only` : "live: not counted as a rep live; no human label" };
+      const label: Instructed = h.swing?.includes(best.rep) ? "swing" : h.loose?.includes(best.rep) ? "loose" : h.rest;
+      return { label, note: `${h.note}; matched to live set ${best.set_no} rep ${best.rep}` };
+    };
+    const start = () => {
+      if (!armed) return;
+      setNo++;
+      const calNow = e.getCalibration() ?? cal;
+      const meta: RecordingMeta = {
+        recording_id: `live:${s.session_id}`, source: "real", person, session_id: s.session_id, exercise: armed.exercise, variant: armed.variant,
+        load_lb: armed.load_lb ?? null, load_desc: armed.load_lb ? `${armed.load_lb} lb dumbbell${armed.arms.length > 1 ? "s" : ""}` : "unknown", arms_on: armed.arms, sample_hz: 200,
+        calibration: { rest: calNow.rest, mvc: calNow.mvc, note: "stored live session calibration (plus the engine's raise-only MVC updates from earlier sets of the session)" },
+        file: "data/lightweight.sqlite (not committed)",
+      };
+      const run: SetRun = { meta, set_index: setNo, set_label: `armed set ${setNo}`, instructed: null, set: null as unknown as SetEndEvent, repEventKeys: new Set(), samples: [], labelAt: () => null };
+      run.repInstruction = labelOf;
+      e.startSet({ session_id: s.session_id, set_id: `${s.session_id}/set${setNo}`, person, exercise: armed.exercise, variant: armed.variant, load_lb: armed.load_lb, arms: armed.arms });
+      cur = { run, pct: toPctFn(calNow) };
+    };
+    const close = (se: SetEndEvent | null) => {
+      const c = cur as typeof cur;
+      if (c && se) {
+        c.run.set = se;
+        if (se.reps.some((r) => labelOf(r).label != null)) c.run.labelSource = "human_per_rep";
+        if (se.reps.length) out.push(c.run); // empty armed sets carry nothing
+      }
+      cur = null;
+    };
+    let ev = 0;
+    for (const row of batches) {
+      const c = cur as typeof cur;
+      feed(e, JSON.parse(row.payload) as Batch, c ? c.pct : toPctFn(cal), clock, c ? c.run.samples : [], (se) => {
+        close(se);
+        if (armed?.auto_next) start(); // the server re-arms after an automatic set end
+      }, c ? c.run.repEventKeys : new Set());
+      while (ev < events.length && events[ev].after_batch_id <= row.batch_id) {
+        const x = events[ev++];
+        if (x.kind === "set_start") {
+          close(e.endSet());
+          armed = JSON.parse(x.payload) as ArmCtx;
+          start();
+        } else {
+          close(e.endSet());
+          armed = null;
+        }
       }
     }
+    close(e.endSet());
   }
   db.close();
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------ main
@@ -502,14 +588,18 @@ async function main() {
       calNote: "'ceiling' calibration from tests/engine-real.test.ts: rest from the clean relax phases, MVC = ENV ceiling 14960 (curls and the raise hold saturate).",
     }),
   ];
+  if (DB_PATH && !existsSync(DB_PATH)) throw new Error(`--db ${DB_PATH}: file not found`);
+  const live = DB_PATH ? runLive(DB_PATH) : [];
   const syn = WITH_SYNTH ? runSynthetic() : [];
 
   const out: Out = { reps: [], windows: [], sft: [] };
   emit(real, out);
+  emit(live, out);
   emit(syn, out);
-  if (DB_PATH) {
-    if (!existsSync(DB_PATH)) throw new Error(`--db ${DB_PATH}: file not found`);
-    await emitDb(DB_PATH, out);
+  // Wording guard on every target line: no "snitch", no raw delt share.
+  for (const row of out.sft as { id: string; messages: { role: string; content: string }[] }[]) {
+    const line = row.messages[1].content;
+    if (/snitch/i.test(line) || mentionsRawShare(line)) throw new Error(`wording rule broken in ${row.id}: ${line}`);
   }
 
   mkdirSync(OUT, { recursive: true });
@@ -520,7 +610,7 @@ async function main() {
 
   // Console summary for the sanity check (counts per recording/set vs the engine-real tests).
   console.log(`wrote ${OUT}`);
-  for (const run of [...real, ...syn]) {
+  for (const run of [...real, ...live, ...syn]) {
     const reps = run.set.reps;
     const lab = reps.map((r) => labelFor(run, r));
     console.log(
