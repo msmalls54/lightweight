@@ -1,6 +1,6 @@
 import { DEFAULT_CONFIG } from "../engine/index.js";
 import { thresholdsFor } from "../engine/config.js";
-import type { RepEvent, Variant } from "./types.js";
+import type { RepEvent, SetEndEvent, Variant } from "./types.js";
 
 /** Call-out thresholds (code decides; the voice just says it). */
 export const CUE_CONFIG = {
@@ -43,6 +43,36 @@ export function pickCueSequence(rep: RepEvent, opts: PickCueOptions = {}): strin
   if (cue.startsWith("rep_") || cue === "clean_rep") return [cue];
   const n = rep.rep >= 1 && rep.rep <= CUE_CONFIG.maxCountedRep ? [`rep_${rep.rep}`] : [];
   return [...n, cue];
+}
+
+const COUNT_CLIP = ["all_clean", "one_cheat", "two_cheats", "three_cheats", "four_cheats"];
+
+/**
+ * Instant, pre-generated set-end feedback (2–3 clips, ~3 s) to play the moment the set ends,
+ * while the Gemini summary is still being written and spoken. Pure code.
+ *   ["set_done", "all_clean"] | ["set_done", "learning_clean_rep"]
+ *   ["set_done", "two_cheats", "big_swing"] | ["set_done", "many_cheats", "shoulder_late"]
+ * Pass to LWAudio.playClip(keys): sequences starting with "set_done" wait their turn instead of
+ * being dropped by the cooldown.
+ */
+export function pickSetEndCueSequence(set: SetEndEvent): string[] {
+  const n = set.reps?.length ?? 0;
+  if (!n) return ["set_done"];
+  if (set.cheats === 0) {
+    const learning = set.reps.every((r) => r.baseline_up_delt_ratio == null);
+    return ["set_done", learning ? "learning_clean_rep" : "all_clean"];
+  }
+  const out = ["set_done", COUNT_CLIP[set.cheats] ?? "many_cheats"];
+  const cheatNos = set.reps.filter((r) => r.cheat).map((r) => r.rep);
+  const last = Math.max(...set.reps.map((r) => r.rep));
+  const runToEnd = cheatNos.length >= 2 && cheatNos.every((c, i) => c === cheatNos[0] + i) && cheatNos.at(-1) === last;
+  const bigSwing = set.reps.some((r) => {
+    const b = r.baseline_up_delt_ratio;
+    return r.cheat && r.up_delt_ratio != null && b != null && b > 0 && r.up_delt_ratio / b >= 4;
+  });
+  if (runToEnd) out.push("shoulder_late");
+  else if (bigSwing) out.push("big_swing");
+  return out;
 }
 
 /** Clip for the end of a set, from the engine's decision. */

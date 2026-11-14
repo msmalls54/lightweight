@@ -9,6 +9,8 @@ export const ARM_CH: Record<Arm, { bi: number; delt: number }> = { R: { bi: 0, d
 export const DETAIL_CONFIG = {
   /** Cheat rep whose up-phase delt ratio is at least this many times the clean reference = a full swing. */
   bigSwingX: 4,
+  /** A rep whose up phase is under this x the set's median = "faster than your usual". */
+  fasterThanUsualX: 0.75,
   /** Clean rep at or above this multiple = a near-miss worth mentioning. */
   nearMissX: 1.5,
   /** Set-level balance verdict uses the plan target (plan.json: R/L biceps share 0.45–0.55). */
@@ -105,6 +107,9 @@ export function setFacts(set: SetEndEvent, variant?: Variant) {
   // Tempo.
   const ups = set.reps.map((r) => r.up_ms).filter((x) => x > 0);
   const fastReps = reps.filter((r) => r.fast_up).map((r) => r.rep);
+  // "Faster than your usual": up phase under 0.75 x this set's median (but not already rushed).
+  const med = ups.length ? median(ups)! : null;
+  const fasterThanUsual = med == null ? [] : reps.filter((r) => !r.fast_up && r.up_ms > 0 && r.up_ms < DETAIL_CONFIG.fasterThanUsualX * med).map((r) => r.rep);
   const cheatUp = avg(cheatReps.map((r) => r.up_ms).filter((x) => x > 0));
   const cleanUp = avg(cleanReps.map((r) => r.up_ms).filter((x) => x > 0));
 
@@ -167,6 +172,8 @@ export function setFacts(set: SetEndEvent, variant?: Variant) {
       median_up_ms: ups.length ? Math.round(median(ups)!) : null,
       fast_up_threshold_ms: fastUpMs(variant),
       fast_up_reps: fastReps,
+      /** Not rushed by the absolute rule, but under 0.75 x the set's median up time. */
+      faster_than_usual_reps: fasterThanUsual,
       cheat_reps_avg_up_ms: cheatUp == null ? null : Math.round(cheatUp),
       clean_reps_avg_up_ms: cleanUp == null ? null : Math.round(cleanUp),
       cheats_came_with_fast_tempo: cheatReps.length > 0 && cheatReps.filter((r) => r.up_ms > 0 && r.up_ms < fastUpMs(variant)).length > cheatReps.length / 2,
@@ -285,6 +292,17 @@ export function decisionLine(next: string): string {
   return DECISION_LINE[next] ?? "Same weight, keep going.";
 }
 
+/** Shorter decision lines for the spoken summary (25-word cap). */
+const DECISION_SHORT: Record<string, string> = {
+  continue: "Same weight, keep going.",
+  stop_at_first_cheat_rest_longer: "Next set, stop at the first cheat.",
+  slow_the_tempo: "Slow it down next set.",
+};
+
+export function decisionShort(next: string): string {
+  return DECISION_SHORT[next] ?? "Same weight, keep going.";
+}
+
 /** "4", "4 and 8", "4, 5 and 8" */
 export function listReps(ns: number[]): string {
   if (ns.length <= 1) return ns.join("");
@@ -306,35 +324,34 @@ function multiples(rs: ReturnType<typeof repFacts>[], unit: "times" | "x"): stri
 export function cleanSetCue(f: ReturnType<typeof setFacts>): string {
   return f.tempo.fast_up_reps.length > f.total_reps / 2
     ? "Control the tempo: two seconds up, no bounce at the bottom."
-    : "Same groove next set: elbows pinned, squeeze at the top.";
+    : "Same groove: elbows pinned, squeeze at the top.";
 }
 
-/** Deterministic spoken summary: used when Gemini is down or its line breaks a rule. Never quotes delt share. */
+/** Spoken summary cap: ~25 words is about 8 s of speech. */
+export const SPOKEN_MAX_WORDS = 25;
+
+/** Deterministic spoken summary (<= 25 words): used when Gemini is down or its line breaks a rule. Never quotes delt share. */
 export function fallbackSummary(set: SetEndEvent): string {
   const f = setFacts(set);
-  const decision = decisionLine(set.decision?.next);
+  const decision = decisionShort(set.decision?.next);
   if (f.total_reps === 0) return `No reps counted. ${decision}`;
   if (f.reference_status === "learning" && f.cheats === 0)
-    return `${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in. I'm still learning your clean rep, so no calls yet. Keep them strict.`;
-  if (f.cheats === 0) return `All ${f.total_reps} reps clean, your shoulder stayed in its normal range. ${cleanSetCue(f)} ${decision}`;
+    return `${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in. Still learning your clean rep, so no calls yet. Keep them strict.`;
+  if (f.cheats === 0) return `All ${f.total_reps} reps clean, shoulder in its normal range. ${cleanSetCue(f)} ${decision}`;
   const cheatsF = f.reps.filter((r) => r.verdict === "cheat");
   if (f.cheat_pattern.startsWith("fatigue") && cheatsF.length >= 3) {
     const m = multiples(cheatsF, "times");
-    return `From rep ${f.first_cheat_rep} on, your ${side(cheatsF[0].arm)} shoulder took over${m ? `, ${m} its normal share on the way up` : ""}. ${decision}`;
+    return `From rep ${f.first_cheat_rep} on, your ${side(cheatsF[0].arm)} shoulder took over${m ? `, ${m} normal` : ""}. ${decision}`;
   }
   const parts: string[] = [];
   const big = f.reps.filter((r) => r.label === "big_swing");
   const other = cheatsF.filter((r) => r.label !== "big_swing");
   if (big.length)
-    parts.push(
-      `Rep${big.length > 1 ? "s" : ""} ${listReps(big.map((r) => r.rep))}: your ${side(big[0].arm)} shoulder did ${multiples(big, "times")} its normal share on the way up, that's a swing.`,
-    );
-  if (other.length && other.every((r) => r.up_delt_x_clean == null))
-    parts.push(`Rep${other.length > 1 ? "s" : ""} ${listReps(other.map((r) => r.rep))}: your shoulder took over.`);
+    parts.push(`Rep${big.length > 1 ? "s" : ""} ${listReps(big.map((r) => r.rep))}: ${side(big[0].arm)} shoulder at ${multiples(big, "times")} normal, that's a swing.`);
+  if (other.length && (big.length || other.every((r) => r.up_delt_x_clean == null)))
+    parts.push(`Rep${other.length > 1 ? "s" : ""} ${listReps(other.map((r) => r.rep))} ${big.length ? "smaller" : other.length > 1 ? "were cheats: your shoulder took over" : "was a cheat: your shoulder took over"}.`);
   else if (other.length)
-    parts.push(
-      `Rep${other.length > 1 ? "s" : ""} ${listReps(other.map((r) => r.rep))} ${other.length > 1 ? `were ${big.length ? "smaller " : ""}cheats` : `was a ${big.length ? "smaller " : ""}cheat`}${other.some((r) => r.up_delt_x_clean != null) ? ` at ${multiples(other, "times")} normal` : ""}.`,
-    );
+    parts.push(`Rep${other.length > 1 ? "s" : ""} ${listReps(other.map((r) => r.rep))}: ${side(other[0].arm)} shoulder at ${multiples(other, "times")} normal.`);
   return `${parts.join(" ")} ${decision}`;
 }
 
@@ -369,7 +386,9 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
     bullets.push(
       f.tempo.fast_up_reps.length
         ? `Tempo: ${f.tempo.fast_up_reps.length} rep${f.tempo.fast_up_reps.length > 1 ? "s" : ""} came up in under ${f.tempo.fast_up_threshold_ms} ms (rep${f.tempo.fast_up_reps.length > 1 ? "s" : ""} ${listReps(f.tempo.fast_up_reps)}).`
-        : `Tempo: about ${(f.tempo.median_up_ms / 1000).toFixed(1)} s up per rep, nothing rushed.`,
+        : f.tempo.faster_than_usual_reps.length
+          ? `Tempo: nothing rushed, but rep${f.tempo.faster_than_usual_reps.length > 1 ? "s" : ""} ${listReps(f.tempo.faster_than_usual_reps)} came up faster than your usual.`
+          : `Tempo: about ${(f.tempo.median_up_ms / 1000).toFixed(1)} s up per rep, nothing rushed.`,
     );
   if (f.balance)
     bullets.push(`L/R: right biceps did ${f.balance.right_biceps_share_pct}% of the curl work (target 45–55%), ${f.balance.verdict}.`);

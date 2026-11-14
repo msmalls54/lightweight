@@ -137,3 +137,17 @@ test("trimSilence cuts padding but keeps a little lead/tail", async () => {
   const silent = pcmToWav(Buffer.alloc(4800), rate);
   assert.equal(trimSilence(silent), silent);
 });
+
+test("speak shares one TTS request between concurrent calls for the same text", async () => {
+  _resetVoiceForTests();
+  let calls = 0;
+  const slow: Synth = async () => {
+    calls++;
+    await new Promise((r) => setTimeout(r, 30));
+    return pcmToWav(Buffer.alloc(4800, 1));
+  };
+  await initVoice({ apiKey: "x", cacheDir: tmp(), synth: slow, keys: [], log: () => {} });
+  const [a, b] = await Promise.all([speak("Set line."), speak("Set line.")]);
+  assert.equal(calls, 1);
+  assert.equal(a, b);
+});

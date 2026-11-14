@@ -141,10 +141,10 @@ test("mentionsLoadChange", () => {
 test("fallbackSummary phrases the decision", () => {
   assert.equal(
     fallbackSummary(swingSet()),
-    "Reps 6 and 7: your shoulder took over. Next set, stop at the first cheat and rest longer, same weight.",
+    "Reps 6 and 7 were cheats: your shoulder took over. Next set, stop at the first cheat.",
   );
-  assert.match(fallbackSummary(set([rep(), rep()])), /^2 reps in\. I'm still learning your clean rep/);
-  assert.match(fallbackSummary(set([rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.2 }), rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.22 })])), /^All 2 reps clean, your shoulder stayed in its normal range\./);
+  assert.match(fallbackSummary(set([rep(), rep()])), /^2 reps in\. Still learning your clean rep/);
+  assert.match(fallbackSummary(set([rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.2 }), rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.22 })])), /^All 2 reps clean, shoulder in its normal range\./);
 });
 
 test("writeTodayHistory writes code numbers; walk-ups skipped", () => {
