@@ -1,6 +1,6 @@
 // Live smoke test for ④ voice + coach brain. Hits the real Gemini API.
 //   npx tsx scripts/voice-smoke.ts          3 clips + Hydrogen Q&A + spoken/detail summaries of Mike's real Nov 14 sets
-//   (never plays audio: WAVs are written to server/.cache/voice-smoke/)
+//   --tts also synthesizes each summary (never plays audio: WAVs are written to server/.cache/voice-smoke/)
 //   npx tsx scripts/voice-smoke.ts --all    also pre-generate every clip into server/.cache/voice
 import fs from "node:fs";
 import path from "node:path";
@@ -34,30 +34,34 @@ let t = Date.now();
 const a = await answer(ctx, q);
 console.log(`\nQ: ${q}\nA (${Date.now() - t} ms): ${a}`);
 
-// Mike's real live set (Nov 14 12:25, session s-1114-122526-r82). No audio playback: WAVs go to disk only.
-const fx = JSON.parse(
-  fs.readFileSync(fileURLToPath(new URL("../src/coach/fixtures/real-session-s-1114-122526-r82.json", import.meta.url)), "utf8"),
-) as { sets: { set_no: number; set_end: SetEndEvent; coach_line_at_the_time: string }[] };
-const realSets = fx.sets.map((s) => s.set_end);
-for (const s of fx.sets) {
-  const sctx = buildCoachContext({ person: "Mike", todaySets: realSets.slice(0, s.set_no) });
-  console.log(`\n=== real set ${s.set_no}: ${s.set_end.reps.length} reps, cheats ${JSON.stringify(s.set_end.reps.filter((r) => r.cheat).map((r) => r.rep))}`);
+// Mike's real live sets (Nov 14). No audio playback: WAVs go to disk only.
+type Fx = { session_id: string; sets: { set_no: number; ctx: { exercise: string; variant: string; load_lb?: number }; set_end: SetEndEvent; coach_line_at_the_time: string }[] };
+const readFx = (f: string) => JSON.parse(fs.readFileSync(fileURLToPath(new URL(`../src/coach/fixtures/${f}`, import.meta.url)), "utf8")) as Fx;
+const sessions = [readFx("real-session-s-1114-122526-r82.json"), readFx("real-session-s-1114-123449-zdw.json")];
+const allSets = sessions.flatMap((x) => x.sets);
+const setMeta = Object.fromEntries(allSets.map((s) => [s.set_end.set_id, s.ctx]));
+const realSets = allSets.map((s) => s.set_end);
+for (const [i, s] of allSets.entries()) {
+  const sctx = buildCoachContext({ person: "Mike", todaySets: realSets.slice(0, i + 1), setMeta });
+  console.log(`\n=== ${s.set_end.set_id}: ${s.set_end.reps.length} reps, cheats ${JSON.stringify(s.set_end.reps.filter((r) => r.cheat).map((r) => r.rep))}`);
   console.log(`before:  ${s.coach_line_at_the_time}`);
   t = Date.now();
   const line = await summarizeSet(sctx, s.set_end);
   const tLine = Date.now() - t;
   console.log(`spoken (${tLine} ms, ${line.split(/\s+/).length} words, ${line === fallbackSummary(s.set_end) ? "CODE FALLBACK" : "gemini"}): ${line}`);
-  t = Date.now();
-  const wav = await synth(line);
-  const ttsMs = Date.now() - t;
-  fs.writeFileSync(path.join(outDir, `real-set-${s.set_no}-summary.wav`), wav);
-  console.log(`  TTS ${ttsMs} ms -> ${wavDurationMs(wav)} ms of speech`);
+  if (process.argv.includes("--tts")) {
+    t = Date.now();
+    const wav = await synth(line);
+    const ttsMs = Date.now() - t;
+    fs.writeFileSync(path.join(outDir, `${s.set_end.set_id}-summary.wav`), wav);
+    console.log(`  TTS ${ttsMs} ms -> ${wavDurationMs(wav)} ms of speech`);
+  }
   t = Date.now();
   const d = await summarizeSetDetail(sctx, s.set_end);
   console.log(`detail (${Date.now() - t} ms, source ${d.source}):\n  headline: ${d.headline}\n${d.bullets.map((b) => "  - " + b).join("\n")}\n  cue: ${d.cue}`);
 }
-const ctx2 = buildCoachContext({ person: "Mike", todaySets: realSets });
-for (const q2 of ["Which rep did I cheat?", "Which arm is weaker?", "Compare my last two sets."]) {
+const ctx2 = buildCoachContext({ person: "Mike", todaySets: realSets, setMeta });
+for (const q2 of ["Which rep did I cheat?", "Which arm is weaker?", "Compare my last two sets.", "How does today compare to yesterday?"]) {
   t = Date.now();
   const ans = await answer(ctx2, q2);
   console.log(`\nanswer "${q2}" (${Date.now() - t} ms): ${ans}`);

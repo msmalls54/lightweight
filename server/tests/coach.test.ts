@@ -105,15 +105,16 @@ test("summarizeSet uses the brain, and passes facts + decision", async () => {
   let seen = "";
   setBrain(async (_sys, prompt) => {
     seen = prompt;
-    return "**Reps six and seven**: your delt took over at 46 percent. Stop at the first cheat and rest longer.";
+    return "**Reps six and seven**: your shoulder took over. Stop at the first cheat and rest longer.";
   });
   const s = swingSet();
   const ctx = buildCoachContext({ person: "Mike", todaySets: [s], dataDir: DATA });
   const line = await summarizeSet(ctx, s);
-  assert.equal(line, "Reps six and seven: your delt took over at 46 percent. Stop at the first cheat and rest longer.");
+  assert.equal(line, "Reps six and seven: your shoulder took over. Stop at the first cheat and rest longer.");
   assert.match(seen, /"first_cheat_rep":6/);
   assert.match(seen, /stop at the first cheat/i);
-  assert.match(seen, /LAST_SESSION: \{"date":"2026-11-13"/);
+  assert.match(seen, /LAST_SESSION_SAME_LIFT: none/); // no setMeta -> no like-for-like history
+  assert.doesNotMatch(seen, /delt_share/);
   setBrain(undefined);
 });
 
@@ -140,9 +141,10 @@ test("mentionsLoadChange", () => {
 test("fallbackSummary phrases the decision", () => {
   assert.equal(
     fallbackSummary(swingSet()),
-    "Reps 6 and 7: your delt took over, 46 percent delt share. Next set, stop at the first cheat and rest longer, same weight.",
+    "Reps 6 and 7: your shoulder took over. Next set, stop at the first cheat and rest longer, same weight.",
   );
-  assert.match(fallbackSummary(set([rep(), rep()])), /^2 reps, all clean\. Same weight/);
+  assert.match(fallbackSummary(set([rep(), rep()])), /^2 reps in\. I'm still learning your clean rep/);
+  assert.match(fallbackSummary(set([rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.2 }), rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.22 })])), /^All 2 reps clean, your shoulder stayed in its normal range\./);
 });
 
 test("writeTodayHistory writes code numbers; walk-ups skipped", () => {

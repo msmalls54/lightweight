@@ -1,0 +1,138 @@
+{
+ "_note": "Real live session Nov 14 12:34, read-only export from data/lightweight.sqlite. 3 clean reps at 35 lb; the old coach line compared a 51% whole-rep delt share to yesterday's band-curl 10% and confused Mike.",
+ "session_id": "s-1114-123449-zdw",
+ "sets": [
+  {
+   "set_no": 1,
+   "ctx": {
+    "session_id": "s-1114-123449-zdw",
+    "set_id": "set-1114-123454-a4u",
+    "person": "Mike",
+    "exercise": "dumbbell curl",
+    "variant": "standing",
+    "load_lb": 35,
+    "arms": [
+     "R",
+     "L"
+    ]
+   },
+   "set_end": {
+    "type": "set_end",
+    "set_id": "set-1114-123454-a4u",
+    "reps": [
+     {
+      "type": "rep",
+      "set_id": "set-1114-123454-a4u",
+      "arm": "R",
+      "rep": 1,
+      "start_ms": 2232745,
+      "end_ms": 2234520,
+      "peak_pct": [
+       0.912,
+       0.941,
+       0.017,
+       0.358
+      ],
+      "mean_pct": [
+       0.609,
+       0.563,
+       0.01,
+       0.186
+      ],
+      "delt_share": 0.48,
+      "baseline_delt_share": null,
+      "up_delt_ratio": 0.793,
+      "baseline_up_delt_ratio": null,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.984,
+      "up_ms": 455,
+      "down_ms": 930
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-123454-a4u",
+      "arm": "R",
+      "rep": 2,
+      "start_ms": 2237755,
+      "end_ms": 2238880,
+      "peak_pct": [
+       0.786,
+       0.836,
+       0.094,
+       0.23
+      ],
+      "mean_pct": [
+       0.462,
+       0.525,
+       0.027,
+       0.161
+      ],
+      "delt_share": 0.532,
+      "baseline_delt_share": null,
+      "up_delt_ratio": 0.848,
+      "baseline_up_delt_ratio": null,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.946,
+      "up_ms": 285,
+      "down_ms": 780
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-123454-a4u",
+      "arm": "R",
+      "rep": 3,
+      "start_ms": 2242680,
+      "end_ms": 2245010,
+      "peak_pct": [
+       1,
+       1.024,
+       1,
+       0.683
+      ],
+      "mean_pct": [
+       0.756,
+       0.824,
+       0.781,
+       0.441
+      ],
+      "delt_share": 0.521,
+      "baseline_delt_share": 0.532,
+      "up_delt_ratio": 0.977,
+      "baseline_up_delt_ratio": 0.848,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.492,
+      "up_ms": 380,
+      "down_ms": 770
+     }
+    ],
+    "clean": 3,
+    "cheats": 0,
+    "first_cheat_rep": null,
+    "decision": {
+     "next": "continue",
+     "reason": "All 3 reps clean. Same weight."
+    },
+    "calibration": {
+     "rest": [
+      539,
+      477,
+      735,
+      581
+     ],
+     "mvc": [
+      14946,
+      14918,
+      14915,
+      12969
+     ],
+     "ok": true,
+     "problems": []
+    }
+   },
+   "coach_line_at_the_time": "Three clean reps with zero cheats, though your delt share hit 51 percent compared to 10 percent on strict reps yesterday. Same weight, keep going."
+  }
+ ]
+}
