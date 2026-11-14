@@ -40,8 +40,8 @@ Behavior worth knowing:
 
 Signal = %MVC of the active arm's biceps (max of both when both arms are on).
 
-1. **Onset:** the first sample ≥ `lo` (0.15) after the signal was below `lo`. The rep window starts here.
-2. **Start:** the signal crosses up through `hi` (0.35). Ignored if it's within `minGapMs` (400 ms) of the last rep's end; it must drop again before it can count.
+1. **Onset:** the lowest point since the last rep ended, or the first sample back above `lo` (0.15) if the signal went below it. The rep window starts here. (Heavy continuous reps never relax below `lo` between reps.)
+2. **Start:** the signal crosses up through `hi` (0.35). Within `minGapMs` (400 ms) of the last rep's end the start is *deferred*, not dropped: a rep that follows straight on still counts once the gap has passed.
 3. **End:** the signal drops below `max(lo, min(endLevelMax, endPeakFrac × rep peak))`. For a hard rep (peak 1.0) that's 0.25, so the slow envelope decay after hard reps doesn't drag the rep out or split it in two.
 4. Windows shorter than `minRepMs` (400 ms, onset → end) are thrown away as twitches.
 
@@ -49,9 +49,15 @@ Per rep: peak and mean %MVC for all 4 channels over the window. `up_ms` = onset 
 
 ## Cheat flag (per arm)
 
-- **Baseline** = mean `delt_share` of that arm's first 2 reps in the set, **capped at `baselineCap` (0.25)**. Reps 1–2 have `baseline_delt_share: null` and are compared against the cap. The cap stops a set that swings from rep 1 from hiding all its cheats behind a high baseline. Without it, the real Nov 13 swing set's baseline would be 0.42 and rep 3 (0.48) would pass.
-- `delt_share > baseline + 0.15` → `cheat_reason: "delt_share_jump"`. Checked first.
-- Otherwise, delt peak %MVC > 0.5 → `"delt_peak"`.
+Every rep is judged against that arm's **clean reference**: delt share, delt mean %MVC and delt peak %MVC of a clean rep for this person, load and pad placement. There are no absolute delt limits: with 35 lb dumbbells the front delt works hard on strict reps too.
+
+- **Reference:** once the arm has done 2 reps in the set, the per-feature *max* over the unflagged ones among them. Max, so a light warm-up rep 1 doesn't make rep 3 look like a cheat. Before that, the reference is the last clean reference from an earlier set **in the same session with the same exercise, variant and load**. Swinging from rep 1 is caught when a clean set came first. `baseline_delt_share` = the reference's share (null = no reference).
+- **No reference** (first reps of the session for that exercise): only a blatant delt share > `fallbackShareMax` (0.6) is flagged.
+- `delt_share > ref + 0.15` → `"delt_share_jump"`. This is what fires on band curls: the delt is quiet on clean reps.
+- delt mean ≥ 1.5 × ref **and** ≥ ref + 0.15 → also `"delt_share_jump"` (the "delt took over" family; BUILD.md's union has no separate value). This is what fires under heavy load: a swing raises delt *and* biceps, so the share barely moves (+0.04–0.08), but the delt level jumps ~1.5–1.8×.
+- delt peak > max(0.5, ref peak + 0.4) → `"delt_peak"`.
+
+Known limits: a heavy swing from rep 1, with no earlier clean set of the same exercise in the session, isn't flagged unless the share is > 0.6. Delt-fires-before-biceps timing doesn't separate strict from swing under load (the delt leads on strict 35 lb reps too), so it isn't used.
 
 ## CoachDecision (set end)
 
@@ -73,10 +79,21 @@ Rest 570/495, MVC 14960, 20 Hz, each phase fed as its own set:
 
 Swing rep 1 (share 0.22, delt peak 0.35) is a light swing and stays unflagged under both rules. The phase labels in the CSV lag the movement: each "curls" phase ends mid-rep, and the following "rest" phase holds one more rep.
 
+## Real data (Nov 14, 35 lb dumbbells, both arms, `2026-11-14-fulltest-35lb-bilateral.csv`)
+
+One session: STRICT set, then CHEAT set. Same result with the lead's calibration (rest 602/932/804/1301, MVC 9691/14963/14938/14954) and with rest from the clean relax phases + MVC at the ceiling:
+
+| Set | Reps | Flagged | R delt mean | L delt mean | R share |
+|---|---|---|---|---|---|
+| strict | 7 (2 spill into the relax4 label) | none | 0.45–0.52 | 0.30–0.44 | 0.49–0.52 |
+| swing | 6 | reps 2–6 → `stop_at_first_cheat_rest_longer` | 0.75–0.86 | 0.49–0.65 | 0.54–0.58 |
+
+Swing rep 1 has strict-level delt (R 0.49) and stays clean. Tightest margin: strict L rep 5 at 1.42× its reference vs the smallest swing at 1.53× (R).
+
 ## How to tune
 
 1. Record a set (the server stores raw batches). Replay it into `new Engine({...})` in a scratch test and print `end.reps`. `tests/engine-real.test.ts` shows how to turn rows into batches.
 2. **Missed reps:** lower `hi`. **Reps split in two:** raise `endPeakFrac`/`endLevelMax` or `minGapMs`. **Twitches counted:** raise `minRepMs`. Don't go above ~0.5 s: real swing reps can be that short.
-3. **False cheats on strict reps:** raise `deltShareJump` or `deltPeakMax`. Check the delt pad placement first (CLAUDE.md: 2 finger-widths below the shoulder tip). **Missed swings:** lower them.
-4. Per-variant: `new Engine({ variantOverrides: { preacher: { deltPeakMax: 0.4 } } })`.
-5. Run `npm test`. The real-CSV test must stay green.
+3. **False cheats on strict reps:** look at `cheat_reason` and compare the rep with `baseline_delt_share` / the first reps. Band-type false flags → raise `deltShareJump`. Heavy-load false flags → raise `deltMeanRatio`/`deltMeanJump`. Check the delt pad placement first (CLAUDE.md: 2 finger-widths below the shoulder tip). **Missed swings:** lower them.
+4. Per-variant: `new Engine({ variantOverrides: { preacher: { deltMeanRatio: 1.4 } } })`.
+5. Run `npm test`. Both real-CSV tests must stay green.

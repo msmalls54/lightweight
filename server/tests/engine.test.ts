@@ -68,7 +68,7 @@ test("rep windows line up with the ground truth", () => {
   });
 });
 
-test("swing set: every rep flagged from rep 1", () => {
+test("blatant swing set: every rep flagged from rep 1, even with no clean reference", () => {
   const { end } = runSet(calibrated(), presets.swing(5));
   assert.equal(end.reps.length, 5);
   assert.equal(end.cheats, 5);
@@ -96,13 +96,56 @@ test("fatigue drift: clean through rep 5, delt takes over from rep 6", () => {
 
 test("delt peak alone flags a rep", () => {
   // biceps works hard, so share stays low, but the delt spikes past 0.5
-  // share-jump rule switched off so only the peak rule can fire
+  // share and delt-level rules switched off so only the peak rule can fire
   const reps: SynthRep[] = [...presets.clean(3), { bi: 1.3, delt: 0.55 }];
-  const { end } = runSet(calibrated({ deltShareJump: 0.5 }), reps);
+  const { end } = runSet(calibrated({ deltShareJump: 0.5, deltMeanJump: 5 }), reps);
   const last = end.reps[3];
   assert.ok(last.delt_share < 0.35);
   assert.equal(last.cheat, true);
   assert.equal(last.cheat_reason, "delt_peak");
+});
+
+test("heavy load: hard-working delt on clean reps is not a cheat", () => {
+  // The Nov 14 35 lb failure: delt share ~0.45 and delt peak > 0.5 on strict reps.
+  const { end } = runSet(calibrated(), presets.heavyClean(6), { load_lb: 35 });
+  assert.equal(end.reps.length, 6);
+  assert.equal(end.cheats, 0, end.reps.map((r) => `${r.delt_share}/${r.peak_pct[1]}`).join(" "));
+  assert.ok(end.reps.every((r) => r.delt_share > 0.38 && r.peak_pct[CH.R_DELT] > 0.5));
+});
+
+test("heavy load: a swing is caught by the delt level even when the share barely moves", () => {
+  // strict reps then swings in the same set
+  const { end } = runSet(calibrated(), [...presets.heavyClean(3), ...presets.heavySwing(3)], { load_lb: 35 });
+  assert.deepEqual(end.reps.map((r) => r.cheat), [false, false, false, true, true, true]);
+  const jump = end.reps[3].delt_share - end.reps[3].baseline_delt_share!;
+  assert.ok(jump < 0.15, `share only up ${jump}`); // the share rule alone would miss it
+  assert.equal(end.reps[3].cheat_reason, "delt_share_jump");
+});
+
+test("a swing set right after a clean set is judged against the clean set (session reference)", () => {
+  const e = calibrated();
+  runSet(e, presets.heavyClean(4), { set_id: "strict", load_lb: 35 });
+  const swing = runSet(e, presets.heavySwing(4), { set_id: "swing", load_lb: 35 }).end;
+  assert.equal(swing.cheats, 4);
+  assert.ok(swing.reps[0].baseline_delt_share! > 0.38); // reference came from the strict set
+  // ...but only for the same exercise + variant + load
+  const e2 = calibrated();
+  runSet(e2, presets.heavyClean(4), { set_id: "strict", load_lb: 35 });
+  assert.equal(runSet(e2, presets.heavySwing(4), { set_id: "swing", load_lb: 25 }).end.reps[0].baseline_delt_share, null);
+  // ...and only within one session
+  assert.equal(runSet(e, presets.heavySwing(4), { set_id: "s2", session_id: "s2" }).end.reps[0].baseline_delt_share, null);
+});
+
+test("known limit: a heavy swing from rep 1 with no clean reps yet isn't flagged", () => {
+  const { end } = runSet(calibrated(), presets.heavySwing(4), { load_lb: 35 });
+  assert.equal(end.cheats, 0);
+});
+
+test("back-to-back reps with no pause at the bottom all count", () => {
+  // heavy continuous reps: the next rep starts rising right after the last one ends
+  const reps: SynthRep[] = Array.from({ length: 6 }, () => ({ bi: 0.9, delt: 0.1, upMs: 700, holdMs: 100, downMs: 700, gapMs: 0 }));
+  const { end } = runSet(calibrated(), reps);
+  assert.equal(end.reps.length, 6);
 });
 
 // One cheat at rep 3 (within the plan's 1-per-set allowance, but before rep 6).
@@ -346,8 +389,9 @@ test("left arm only uses the left channels", () => {
 
 test("per-variant threshold overrides", () => {
   const reps: SynthRep[] = [...presets.clean(3), { bi: 1.0, delt: 0.45 }];
-  assert.equal(runSet(calibrated({ deltShareJump: 0.5 }), reps).end.cheats, 0);
-  const strictPreacher = calibrated({ deltShareJump: 0.5, variantOverrides: { preacher: { deltPeakMax: 0.4 } } });
+  const peakOnly = { deltShareJump: 0.5, deltMeanJump: 5 };
+  assert.equal(runSet(calibrated(peakOnly), reps).end.cheats, 0);
+  const strictPreacher = calibrated({ ...peakOnly, variantOverrides: { preacher: { deltPeakMax: 0.4, deltPeakJump: 0.3 } } });
   assert.equal(runSet(strictPreacher, reps, { variant: "preacher" }).end.cheats, 1);
   assert.equal(runSet(strictPreacher, reps, { variant: "standing" }).end.cheats, 0);
 });

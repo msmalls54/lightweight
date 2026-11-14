@@ -164,7 +164,12 @@ export function toBatches(
 /** Ready-made sets. */
 export const presets = {
   clean: (n = 8): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.8, delt: 0.08 })),
-  swing: (n = 5): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.55, delt: 0.6 })),
+  /** Blatant swing: delt share ~0.63, flagged even without a clean reference. */
+  swing: (n = 5): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.45, delt: 0.75 })),
+  /** Heavy dumbbells, strict: the delt works hard on clean reps too (share ~0.43, delt peak 0.6). */
+  heavyClean: (n = 6): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.8, delt: 0.6 })),
+  /** Heavy dumbbells, swing: biceps AND delt go up; share only ~0.53, delt level ~1.6x clean. */
+  heavySwing: (n = 4): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.85, delt: 0.95 })),
   /** Clean through rep 5, then the delt climbs from rep 6 on. */
   fatigueDrift: (n = 10): SynthRep[] =>
     Array.from({ length: n }, (_, i) => (i < 5 ? { bi: 0.8, delt: 0.08 } : { bi: 0.75, delt: Math.min(0.6, 0.3 + 0.08 * (i - 5)) })),
