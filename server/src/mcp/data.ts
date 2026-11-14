@@ -10,12 +10,14 @@ const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.le
 const BI: Record<Arm, number> = { R: 0, L: 2 };
 
 /** Said once in every tool result that carries raw numbers. */
-export const RAW_NOTE = "The cheat call uses shoulder help on the way up as a multiple of this person's clean reps (≥1.35× is a cheat, 1.2–1.35× loose). Raw effort (%MVC) is context only: under load the front delt often works at about half the biceps' level even on clean reps, so never call that 'the shoulders did half the work'.";
+export const RAW_NOTE = "The engine's verdict per arm is the call (clean / loose / cheat); its main signal is shoulder help on the way up as a multiple of this person's clean reps (about 1.35× and up is a cheat, unless it's part of a slow fatigue drift, which is 'a bit loose'). Raw effort (%MVC) is context only: under load the front delt often works at about half the biceps' level even on clean reps, so never call that 'the shoulders did half the work'.";
 
 export interface RepView {
   set_no: number; rep: number; arm: Arm;
   /** The lead numbers: verdict + up-phase shoulder help vs this person's clean reps (null until 2 reps set the reference). */
-  verdict: "clean" | "loose" | "cheat"; label: string; shoulder_help_x: number | null; reason: string | null; cheat: boolean;
+  verdict: "clean" | "loose" | "cheat"; label: string; shoulder_help_x: number | null; reason: string | null; cheat: boolean; loose: boolean;
+  /** Per working arm (bilateral reps), from the engine. */
+  arms?: Partial<Record<Arm, { verdict: "clean" | "loose" | "cheat"; shoulder_help_x: number | null }>>;
   /** Both biceps curled on this rep (else it says nothing about L/R balance). */
   both_arms: boolean; r_share: number | null;
   tempo_up_ms: number; tempo_down_ms: number;
@@ -44,11 +46,23 @@ export function cleanCoachLine(line: string | null): string | null {
   return scrubSnitch(line);
 }
 
+/** The rep's verdict: the engine's per-arm verdicts when present (worst arm wins), else its loose flag, else the ratio. */
+export function eventVerdict(r: RepEvent): "clean" | "loose" | "cheat" {
+  const ad = r.arm_detail ? Object.values(r.arm_detail).filter(Boolean).map(d => d!.verdict) : [];
+  if (ad.length) return ad.includes("cheat") ? "cheat" : ad.includes("loose") ? "loose" : "clean";
+  if (r.cheat) return "cheat";
+  if (r.loose) return "loose";
+  const x = upRatioX(r);
+  return x != null && x >= 1.2 ? "loose" : "clean";
+}
+
 export function repView(setNo: number, r: RepEvent): RepView {
   const bi = BI[r.arm], de = bi + 1;
   const x = upRatioX(r);
-  const verdict = r.cheat ? "cheat" : x != null && x >= 1.2 ? "loose" : "clean";
-  return { set_no: setNo, rep: r.rep, arm: r.arm, verdict, label: labelRep(r), shoulder_help_x: x == null ? null : r1(x), cheat: r.cheat,
+  const verdict = eventVerdict(r);
+  const arms = r.arm_detail ? Object.fromEntries(Object.entries(r.arm_detail).filter(([, d]) => d).map(([a, d]) => [a, {
+    verdict: d!.verdict, shoulder_help_x: d!.ref_up_delt_ratio && d!.ref_up_delt_ratio > 0 ? r1(d!.up_delt_ratio / d!.ref_up_delt_ratio) : null }])) : undefined;
+  return { set_no: setNo, rep: r.rep, arm: r.arm, verdict, label: labelRep(r), shoulder_help_x: x == null ? null : r1(x), cheat: r.cheat, loose: verdict === "loose", arms,
     reason: r.cheat ? (r.cheat_reason === "delt_peak" ? "shoulder spike" : "shoulder took over on the way up") : null,
     both_arms: bothCurled(r), r_share: bothCurled(r) && r.r_share != null ? r2(r.r_share) : null,
     tempo_up_ms: Math.round(r.up_ms), tempo_down_ms: Math.round(r.down_ms),

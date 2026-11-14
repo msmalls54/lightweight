@@ -14,7 +14,6 @@ Mike on stage, sensors on, 35 lb dumbbell (or band). Laptop on the projector sho
 - [ ] Replay box: last good session selected, ready (fallback).
 - [ ] Claude open with the Lightweight MCP connected (verified Nov 14; the tunnel link changes if the tunnel restarts, so re-add the connector then. Fallback: the screenshot).
 - [ ] Screenshots on the desktop: muscle-map widget in Claude, a set report card.
-- [ ] Judge briefed for beat-the-agent (whisper "clean" or "cheat" before each rep).
 
 ## Script
 
@@ -26,8 +25,8 @@ Mike on stage, sensors on, 35 lb dumbbell (or band). Laptop on the projector sho
 | 1:05–1:35 | **Swing** | Swing the next rep: lean back, shoulder up. | Coach: **"Rep 5. Your delt took over."** Music ducks; the front delt pulses red on the map; rep flagged in the feed. Set ends: "Set's done. One cheat rep." then the summary ("Rep 5: right shoulder at 8 times normal, that's a swing."). Report card appears. | Not flagged: show the Replay set with reps 4 and 8 caught at 7–9×. No audio: read the coach text on screen. |
 | 1:35–1:55 | **"How's my workout?"** | Say it to the laptop mic (or press the button). | "29 of 40 reps clean so far. Rest of the session: end each set at the first cheat." "Workout so far" card. | Mic misses it: press the button. No audio: read the card. |
 | 1:55–2:20 | **Ask Claude** | In Claude: "Which rep did I cheat, and which arm is weaker?" | Claude answers from the MCP tools; muscle-map widget with the per-rep scrubber. | Tunnel/connection fails or not verified: mcp-use **inspector** (`/inspector`) running `show_last_set`, or the **screenshot**. |
-| 2:20–2:50 | **Beat the agent** | Judge whispers "clean" or "cheat" to Mike before each rep; Mike does 3–4 reps. "The judge knows. Does the agent?" | Each rep flagged or clean, live; call-outs on cheats. Score it out loud: agent vs judge. Scoreboard: `challenge_status`. | Disagreement: "That's a data point: every walk-up becomes a labelled rep." |
-| 2:50–3:00 | **Close** | "Lightweight: an AI coach that can feel your muscles. Come try to beat it." | Dashboard. | — |
+| 2:20–2:45 | **Any lift** | Open Settings → Lift library; click deadlift, then lateral raise. "Curls today. Every lift is a config entry: a target muscle and a cheat-check muscle." | Front and back body maps: target green, cheat check amber, sensor dots. Badges: curl "Live today", the rest "Config ready · not yet tested". | Page fails: say the line over the dashboard. |
+| 2:45–3:00 | **Close** | "Lightweight: an AI coach that can feel your muscles, in your speaker or your earbuds." | Dashboard. | — |
 
 ## If everything breaks
 

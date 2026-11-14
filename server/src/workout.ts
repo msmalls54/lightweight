@@ -1,7 +1,7 @@
 // Today's workout for the dashboard timeline: exercise blocks -> sets -> per-rep verdicts + stored report cards.
 import type { Store } from "./store.js";
 import type { RepEvent, SetContext, SetEndEvent } from "./modules.js";
-import { cleanCoachLine } from "./mcp/data.js";
+import { cleanCoachLine, eventVerdict } from "./mcp/data.js";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -18,7 +18,7 @@ export interface ExerciseBlock { key: string; exercise: string; variant: string;
 export function repVerdict(r: RepEvent): { multiple: number | null; verdict: WorkoutRep["verdict"] } {
   const up = r.up_delt_ratio, base = r.baseline_up_delt_ratio;
   const multiple = up != null && base != null && base > 0 ? r2(up / base) : null;
-  return { multiple, verdict: r.cheat ? "cheat" : multiple != null && multiple >= 1.2 ? "loose" : "clean" };
+  return { multiple, verdict: eventVerdict(r) };
 }
 
 export function workoutToday(store: Store, person: string, activeSessionId?: string, liveSetId?: string) {
