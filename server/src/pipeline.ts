@@ -1,5 +1,5 @@
 // batch -> store -> engine.ingest -> events -> SSE (+ pickCue). Also sets, calibration and replay.
-import { Engine, pickCueSequence, pickSetEndCue, buildCoachContext, summarizeSet, writeTodayHistory,
+import { Engine, pickCueSequence, pickSetEndCue, buildCoachContext, summarizeSet, writeTodayHistory, speak,
   type Arm, type Batch, type Calibration, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "./modules.js";
 import type { Store, SessionKind, EventRow } from "./store.js";
 import type { Hub } from "./hub.js";
@@ -7,7 +7,17 @@ import type { Heartbeat } from "./schemas.js";
 
 export const ENV_CEILING = 14960;
 export interface SetTemplate { exercise: string; variant: Variant; load_lb?: number; arms: Arm[]; auto_next: boolean }
-export const DEFAULT_SET: Omit<SetTemplate, "arms"> = { exercise: "dumbbell curl", variant: "standing", load_lb: 35, auto_next: true };
+export const DEFAULT_SET: Omit<SetTemplate, "arms"> = { exercise: "dumbbell curl", variant: "standing", load_lb: 35, auto_next: false };
+/** Live run Nov 14: 10 s pauses split real sets, and 0.95 of a short flex under-read the biceps MVC.
+ *  The engine also raises the MVC to p99 of each finished set (autoRaiseMvc, on by default). */
+export const ENGINE_CONFIG = { autoEndMs: 30_000, mvcPercentile: 0.99 } as const;
+export const MVC_PERCENTILE = 0.99;
+/** Auto-rest: 10th percentile of the last 5 s of idle samples, taken when a set is armed. */
+export const AUTO_REST = { windowMs: 5000, percentile: 0.1, minSamples: 200, minChange: 25 } as const;
+const DEFAULT_CAL: Calibration = { rest: [550, 550, 550, 550], mvc: [14960, 14960, 14960, 14960], ok: true, problems: [] };
+export type CalSource = "saved" | "calibrated" | "auto";
+/** Fewer distinct reps than this: no coach summary ("set too short"). */
+export const MIN_REPS_FOR_SUMMARY = 3;
 
 export class HttpError extends Error { constructor(readonly status: 400 | 404 | 409, message: string) { super(message); } }
 
@@ -18,7 +28,7 @@ function newId(prefix: string) {
 }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
-const p95 = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length * 0.95)] : 0; };
+const pctl = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * p))] : 0; };
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timed out after ${ms} ms`)), ms))]);
 }
@@ -49,6 +59,8 @@ interface Sess {
   calibration: Calibration | null; calibrating: boolean; cal: { rest?: number[][]; mvc: (number[] | null)[] };
   armed: SetTemplate | null; set: SetContext | null; setNo: number | null; lastBatchId: number;
   sets: SetEndEvent[]; source?: string;
+  /** Where the current calibration came from: saved (last session), calibrated (flex holds), auto (defaults + auto-rest/MVC). */
+  calSource: CalSource;
 }
 
 export class Pipeline {
@@ -125,11 +137,24 @@ export class Pipeline {
     }
     this.store.endSet(e);
     sess.sets.push(e);
+    if (e.calibration) this.applyRaised(sess, e.calibration);
+    const nReps = new Set(e.reps.map(r => r.rep)).size;
+    const short = nReps < MIN_REPS_FOR_SUMMARY;
     let cue: string | null = null;
-    try { cue = pickSetEndCue(e); } catch (err) { console.error("[coach] pickSetEndCue failed:", errMsg(err)); }
-    this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null, cue });
-    void this.coach(sess, e);
+    if (!short) try { cue = pickSetEndCue(e); } catch (err) { console.error("[coach] pickSetEndCue failed:", errMsg(err)); }
+    this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null, cue, n_reps: nReps, too_short: short });
+    if (short) this.hub.send({ type: "coach", set_id: e.set_id, text: null, too_short: true, n_reps: nReps });
+    else void this.coach(sess, e);
     this.writeHistory(sess); // also at session end; per set so a crash never loses the day
+  }
+
+  /** The engine raised the MVC from this set (raise-only, p99, already applied): keep and persist it. */
+  private applyRaised(sess: Sess, cal: Calibration) {
+    const before = sess.calibration?.mvc ?? DEFAULT_CAL.mvc;
+    sess.calibration = cal;
+    if (sess.kind !== "replay") this.store.saveCalibration(sess.id, cal);
+    console.log(`[cal] ${sess.id} MVC raised from the set: ${before.join("/")} -> ${cal.mvc.join("/")}`);
+    this.hub.send({ type: "calibration", phase: "raised", before, ...cal });
   }
 
   private async coach(sess: Sess, e: SetEndEvent) {
@@ -140,6 +165,8 @@ export class Pipeline {
       const text = await withTimeout(summarizeSet(ctx, e), 12_000);
       this.store.saveCoachLine(e.set_id, text);
       console.log(`[coach] ${sess.person} set ${e.set_id}: ${text}`);
+      // Generate the speech ONCE here; the speaker dashboard's /voice/say then hits the server's TTS cache.
+      try { await withTimeout(speak(text), 10_000); } catch (err) { console.error("[voice] summary TTS failed:", errMsg(err)); }
       this.hub.send({ type: "coach", set_id: e.set_id, text, fallback_clip: fallback });
     } catch (err) {
       console.error("[coach] summarizeSet failed:", errMsg(err));
@@ -152,7 +179,7 @@ export class Pipeline {
     const arms = o.arms ?? (o.walkup ? ["R"] : ["R", "L"]);
     const sess: Sess = {
       id: newId(o.kind === "replay" ? "replay" : "s"), person: o.person, isWalkUp: o.walkup, kind: o.kind, arms,
-      engine: new Engine(), ring: new Ring(), calibration: null, calibrating: false, cal: { mvc: [null, null, null, null] },
+      engine: new Engine(ENGINE_CONFIG), ring: new Ring(), calSource: "auto", calibration: null, calibrating: false, cal: { mvc: [null, null, null, null] },
       armed: null, set: null, setNo: null, lastBatchId: 0, sets: [], source: o.source,
     };
     this.store.createSession({ session_id: sess.id, person: sess.person, is_walkup: sess.isWalkUp, kind: sess.kind, arms, source_session_id: o.source });
@@ -168,9 +195,19 @@ export class Pipeline {
     if (this.live) this.endLive();
     const sess = this.newSess(o);
     this.live = sess;
+    if (!sess.isWalkUp) {
+      const saved = this.store.lastCalibration(sess.person);
+      if (saved) {
+        sess.engine.setCalibration(saved);
+        sess.calibration = saved;
+        sess.calSource = "saved";
+        this.store.saveCalibration(sess.id, saved);
+        this.log(sess, "calibration", saved); // replay starts from the same values
+        console.log(`[cal] ${sess.id} loaded ${sess.person}'s saved calibration: rest ${saved.rest.join("/")} mvc ${saved.mvc.join("/")}`);
+      }
+    }
     console.log(`[session] ${sess.id} ${sess.person}${sess.isWalkUp ? " (walk-up)" : ""} arms=${sess.arms.join("+")} kind=${sess.kind}`);
-    // Arm a default set right away so reps count even if nobody touches the dashboard.
-    this.cmdStartSet(sess, { ...DEFAULT_SET, arms: sess.arms });
+    // No set is armed here: a set starts only on Start set (dashboard S / MCP log_exercise).
     if (!this.replay) this.hub.send({ type: "session", session_id: sess.id, person: sess.person, walkup: sess.isWalkUp, arms: sess.arms });
     this.pushStatus();
     return sess;
@@ -211,7 +248,27 @@ export class Pipeline {
     if (sess.armed?.auto_next && !sess.calibrating && !sess.set) this.arm(sess, sess.armed);
   }
 
+  /** Rest drifts (sweat, pad settling): re-measure it from the idle samples right before a set. */
+  private autoRest(sess: Sess) {
+    if (sess.calibrating || Date.now() - sess.ring.lastWall > 1500) return;
+    const w = sess.ring.window(AUTO_REST.windowMs);
+    if (w[0].length < AUTO_REST.minSamples) return;
+    const base = sess.calibration ?? DEFAULT_CAL;
+    const rest = base.rest.map((r, i) => {
+      const est = Math.round(pctl(w[i], AUTO_REST.percentile));
+      // Only plausible idle levels: below the RAW mid-scale trap and well under this channel's MVC.
+      return est < 4000 && est < base.mvc[i] - 1500 && Math.abs(est - r) >= AUTO_REST.minChange ? est : r;
+    });
+    if (rest.every((r, i) => r === base.rest[i])) return;
+    const cal: Calibration = { ...base, rest };
+    sess.engine.setCalibration(cal);
+    sess.calibration = cal;
+    if (sess.kind !== "replay") this.store.saveCalibration(sess.id, cal);
+    this.hub.send({ type: "calibration", phase: "rest", rest, mvc: cal.mvc });
+  }
+
   private arm(sess: Sess, tpl: SetTemplate) {
+    this.autoRest(sess);
     const ctx: SetContext = { session_id: sess.id, set_id: newId("set"), person: sess.person, exercise: tpl.exercise, variant: tpl.variant, load_lb: tpl.load_lb, arms: tpl.arms };
     sess.engine.startSet(ctx);
     sess.set = ctx;
@@ -248,7 +305,7 @@ export class Pipeline {
     const sess = this.liveOrDefault();
     const clean = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as Partial<SetTemplate>;
     const tpl: SetTemplate = { ...(sess.armed ?? { ...DEFAULT_SET, arms: sess.arms }), ...clean };
-    if (!sess.set || sess.setNo === null) { this.cmdStartSet(sess, tpl); this.pushStatus(); return { applies: "now" as const, template: tpl }; }
+    if (sess.set && sess.setNo === null) { this.cmdStartSet(sess, tpl); this.pushStatus(); return { applies: "now" as const, template: tpl }; }
     this.log(sess, "set_next", tpl);
     sess.armed = tpl;
     this.pushStatus();
@@ -287,7 +344,7 @@ export class Pipeline {
     if (w[0].length < 20) throw new HttpError(409, `Only ${w[0].length} samples in the window; wait for the device.`);
     if (step === "rest") sess.cal.rest = w;
     else sess.cal.mvc[ch!] = w[ch!];
-    const level = step === "rest" ? w.map(median) : [p95(w[ch!])];
+    const level = step === "rest" ? w.map(median) : [Math.round(pctl(w[ch!], MVC_PERCENTILE))];
     this.hub.send({ type: "calibration", phase: "captured", step, ch: ch ?? null, level, samples: w[0].length });
     return { step, ch: ch ?? null, samples: w[0].length, level };
   }
@@ -304,6 +361,7 @@ export class Pipeline {
     catch (e) { throw new HttpError(400, `Calibration failed: ${errMsg(e)}`); }
     this.store.saveCalibration(sess.id, cal);
     this.log(sess, "calibration", cal);
+    sess.calSource = "calibrated";
     this.applyCalDone(sess, cal);
     this.hub.send({ type: "calibration", phase: "done", ...cal });
     this.pushStatus();
@@ -313,9 +371,7 @@ export class Pipeline {
     sess.engine.setCalibration(cal);
     sess.calibration = cal;
     sess.calibrating = false;
-    if (!sess.armed) sess.armed = { ...DEFAULT_SET, arms: sess.arms };
-    this.maybeRearm(sess);
-    if (!sess.set) this.arm(sess, sess.armed);
+    this.maybeRearm(sess); // only re-arms when auto next is on (old sessions replay this way)
   }
   calCancel() {
     const sess = this.liveOrDefault();
@@ -409,7 +465,7 @@ export class Pipeline {
         batches_per_s: Math.round((this.batchTimes.filter(t => t >= now - 5000).length / 5) * 10) / 10,
         heartbeat: this.lastHb ? { rssi: this.lastHb.rssi ?? null, queue: this.lastHb.queue ?? null, fw: this.lastHb.fw ?? null, uptime_ms: this.lastHb.uptime_ms ?? null, age_ms: now - this.lastHb.at } : null,
       },
-      session: s ? { id: s.id, person: s.person, walkup: s.isWalkUp, kind: s.kind, arms: s.arms, calibrated: !!s.calibration, calibrating: s.calibrating, cal_problems: s.calibration?.problems ?? [], sets_done: s.sets.length } : null,
+      session: s ? { id: s.id, person: s.person, walkup: s.isWalkUp, kind: s.kind, arms: s.arms, calibrated: !!s.calibration, cal_source: s.calSource, mvc: s.calibration?.mvc ?? null, calibrating: s.calibrating, cal_problems: s.calibration?.problems ?? [], sets_done: s.sets.length } : null,
       set: s?.set ? { set_id: s.set.set_id, set_no: s.setNo, exercise: s.set.exercise, variant: s.set.variant, load_lb: s.set.load_lb ?? null, arms: s.set.arms } : null,
       armed: s?.armed ?? null,
       replay: this.replay ? { source: this.replay.source, i: this.replay.i, n: this.replay.n, speed: this.replay.speed } : null,

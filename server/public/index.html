@@ -30,6 +30,8 @@
   .mode { font-weight: 800; letter-spacing: .1em; }
   .mode.replay { background: #3b2a00; border-color: var(--amber); color: var(--amber); }
   .grow { flex: 1; }
+  .pill.speaker { cursor: pointer; }
+  .pill.speaker.on { border-color: var(--green); color: var(--green); }
   .who { font-size: 22px; font-weight: 700; }
   .who small { color: var(--dim); font-weight: 400; font-size: 16px; }
 
@@ -47,6 +49,9 @@
 
   #setline { flex: none; font-size: clamp(22px, 3.4vh, 36px); font-weight: 800; margin-bottom: 2px; line-height: 1.15; }
   #setline .cnt-clean { color: var(--green); } #setline .cnt-cheat { color: var(--red); }
+  .armstate { flex: none; align-self: flex-start; margin-bottom: 8px; padding: 6px 16px; border-radius: 999px; font-weight: 900; letter-spacing: .08em; font-size: clamp(16px, 2.4vh, 24px); border: 2px solid var(--line); color: var(--dim); }
+  .armstate.armed { color: #06240f; background: var(--green); border-color: var(--green); box-shadow: 0 0 18px #2fd67b66; }
+  .armstate.idle { background: var(--panel2); }
   #setmeta { flex: none; color: var(--dim); font-size: clamp(14px, 1.9vh, 18px); margin-bottom: 10px; }
   #bars { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
   .bar { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; min-width: 0; }
@@ -117,6 +122,7 @@
   <span class="pill"><span class="dot" id="devDot"></span><span id="devText">No device</span></span>
   <span class="pill" id="hbText">Heartbeat: none</span>
   <span class="pill"><span class="dot" id="sseDot"></span><span id="sseText">Dashboard link</span></span>
+  <span class="pill" id="spk" role="button" tabindex="0">🔇 …</span>
   <span class="grow"></span>
   <span class="who" id="who">No session</span>
 </header>
@@ -130,6 +136,7 @@
   </section>
 
   <section class="card">
+    <div id="armState" class="armstate idle">IDLE · press Start set (S)</div>
     <div id="setline">Ready</div>
     <div id="setmeta">Start a set or just curl.</div>
     <div id="bars"></div>
@@ -150,13 +157,13 @@
     <label><input type="checkbox" id="armL" checked> L arm</label>
   </div>
   <div class="grp"><b>Calibrate</b>
-    <button id="btnCal" class="primary">Calibrate (C)</button>
+    <button id="btnCal">Calibrate (C) · optional</button>
   </div>
   <div class="grp"><b>Set</b>
     <input id="exercise" value="dumbbell curl" aria-label="Exercise">
     <select id="variant" aria-label="Variant"><option>standing</option><option>preacher</option><option>hammer</option></select>
     <input id="load" type="number" value="35" min="0" step="5" aria-label="Load lb"> lb
-    <label><input type="checkbox" id="autoNext" checked> auto next</label>
+    <label><input type="checkbox" id="autoNext"> auto next</label>
     <button id="btnStart" class="primary">Start set (S)</button>
     <button id="btnStop">Stop set (X)</button>
   </div>

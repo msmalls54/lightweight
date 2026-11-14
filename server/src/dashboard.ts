@@ -49,7 +49,12 @@ export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store
   });
   app.get("/muscle-map.json", c => sendFile(c, resolve(REPO_ROOT, "assets/muscle-map/anterior.json")));
 
-  app.get("/events", c => hub.connect(c.req.raw.signal, pipeline.snapshot()));
+  app.get("/events", c => hub.connect(c.req.raw.signal, pipeline.snapshot(), { mute: c.req.query("mute") !== undefined }));
+  app.post("/speaker/claim", wrap(async c => {
+    const b = (await c.req.json().catch(() => ({}))) as { client_id?: unknown };
+    if (typeof b.client_id !== "string" || !hub.claim(b.client_id)) throw new HttpError(400, "Unknown or muted dashboard.");
+    return { speaker: b.client_id };
+  }));
   app.get("/api/state", c => c.json(pipeline.status()));
   app.get("/sessions", c => c.json({ sessions: store.listSessions(40) }));
   app.get("/health", c => c.json({ ok: true, service: "lightweight", ...pipeline.status() }));
