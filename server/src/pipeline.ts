@@ -124,10 +124,7 @@ export class Pipeline {
     try { cue = pickSetEndCue(e); } catch (err) { console.error("[coach] pickSetEndCue failed:", errMsg(err)); }
     this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null, cue });
     void this.coach(sess, e);
-    if (sess.kind === "live" && !sess.isWalkUp) {
-      try { writeTodayHistory(this.store.todaySetEnds(sess.person), { person: sess.person, setMeta: this.store.todaySetMeta(sess.person) }); }
-      catch (err) { console.error("[coach] writeTodayHistory failed:", errMsg(err)); }
-    }
+    this.writeHistory(sess); // also at session end; per set so a crash never loses the day
   }
 
   private async coach(sess: Sess, e: SetEndEvent) {
@@ -137,6 +134,7 @@ export class Pipeline {
       const ctx = buildCoachContext({ person: sess.person, todaySets });
       const text = await withTimeout(summarizeSet(ctx, e), 12_000);
       this.store.saveCoachLine(e.set_id, text);
+      console.log(`[coach] ${sess.person} set ${e.set_id}: ${text}`);
       this.hub.send({ type: "coach", set_id: e.set_id, text, fallback_clip: fallback });
     } catch (err) {
       console.error("[coach] summarizeSet failed:", errMsg(err));
@@ -158,7 +156,7 @@ export class Pipeline {
 
   startSession(o: { person: string; walkup: boolean; kind: "live" | "fake"; arms?: Arm[] }) {
     if (this.replay) throw new HttpError(409, "A replay is running; stop it first.");
-    if (this.live) { this.endCurrent(this.live, false); this.store.endSession(this.live.id); }
+    if (this.live) this.endLive();
     const sess = this.newSess(o);
     this.live = sess;
     console.log(`[session] ${sess.id} ${sess.person}${sess.isWalkUp ? " (walk-up)" : ""} arms=${sess.arms.join("+")} kind=${sess.kind}`);
@@ -167,6 +165,23 @@ export class Pipeline {
     this.hub.send({ type: "session", session_id: sess.id, person: sess.person, walkup: sess.isWalkUp, arms: sess.arms });
     this.pushStatus();
     return sess;
+  }
+
+  /** Close the live session; Mike's (non-walk-up, live) day file is rewritten from SQLite. */
+  endLive() {
+    const s = this.live;
+    if (!s) return;
+    this.endCurrent(s, false);
+    this.store.endSession(s.id);
+    this.writeHistory(s);
+    this.live = null;
+  }
+  private writeHistory(sess: Sess) {
+    if (sess.kind !== "live" || sess.isWalkUp) return;
+    try {
+      const sets = this.store.todaySetEnds(sess.person);
+      if (sets.length) writeTodayHistory(sets, { person: sess.person, setMeta: this.store.todaySetMeta(sess.person) });
+    } catch (err) { console.error("[coach] writeTodayHistory failed:", errMsg(err)); }
   }
 
   private log(sess: Sess, kind: string, payload: unknown) {
@@ -331,7 +346,7 @@ export class Pipeline {
     else if (ev.kind === "set_next") { sess.armed = p; }
     else if (ev.kind === "set_stop") { sess.armed = null; this.endCurrent(sess, false); }
     else if (ev.kind === "cal_begin") { this.applyCalBegin(sess); this.hub.send({ type: "calibration", phase: "begin", arms: sess.arms, replay: true }); }
-    else if (ev.kind === "calibration") { this.applyCalDone(sess, p); this.hub.send({ type: "calibration", phase: "done", ...p, replay: true }); }
+    else if (ev.kind === "calibration") { this.store.saveCalibration(sess.id, p); this.applyCalDone(sess, p); this.hub.send({ type: "calibration", phase: "done", ...p, replay: true }); }
     else if (ev.kind === "cal_cancel") { sess.calibrating = false; this.maybeRearm(sess); }
   }
 
