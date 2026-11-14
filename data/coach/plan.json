@@ -1,0 +1,22 @@
+{
+  "_note": "The current training plan. The coach compares today's sets against it. Weights and targets marked TODO are for Mike to fill in.",
+  "program": "Curl focus: clean reps over heavy reps",
+  "rules": {
+    "rep_range": [8, 12],
+    "max_cheat_reps_per_set": 1,
+    "load_policy": "Weights stay constant: 35 lb dumbbells, no load changes. The coach never recommends adding or dropping weight.",
+    "progression": "Progress = more clean reps at 35 lb. If every rep in all sets stays clean at 12, the next goal is 12 clean reps on the slower tempo, not more weight.",
+    "fatigue_signal": "If the delt takes over before rep 6 in two sets in a row, cut the set short at the first cheat and rest longer (no weight change).",
+    "imbalance_target": "Keep R/L biceps share between 0.45 and 0.55.",
+    "cut_adjustment": "On a 500 kcal cut: hold the weight rather than chase progression; a set where effort per rep (%MVC) stays steady and reps stay clean counts as a win. Expect fatigue (delt takeover) earlier than when eating at maintenance; call it out, don't punish it."
+  },
+  "today": {
+    "date": "2026-11-14",
+    "context": "Hackathon demo day: standing band curls, no preacher bench.",
+    "sessions": [
+      { "exercise": "dumbbell curl", "variant": "standing", "sets": 3, "target_reps": 10, "load_lb": 35 },
+      { "exercise": "standing band curl", "variant": "standing", "sets": 1, "target_reps": 12, "load": "band (warm-up / walk-ups)" }
+    ]
+  },
+  "next_up": "Preacher curls back at the gym: TODO weight"
+}

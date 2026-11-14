@@ -1,0 +1,91 @@
+{
+  "date": "2026-11-13",
+  "kind": "bench_test",
+  "note": "First real recording, the night before the hackathon. Right arm only, standing band curls. Values are rough (about 20 samples/s, MVC assumed at the ENV ceiling of ~14,960 because the biceps saturated).",
+  "calibration": {
+    "rest_raw": {
+      "r_biceps": 570,
+      "r_delt": 495
+    },
+    "mvc_raw_assumed": 14960,
+    "biceps_saturated_at_max": true
+  },
+  "sets": [
+    {
+      "exercise": "standing band curl",
+      "variant": "standing",
+      "style_instructed": "strict",
+      "reps": [
+        {
+          "rep": 1,
+          "biceps_peak_pct_mvc": 1,
+          "biceps_mean_pct_mvc": 0.75,
+          "delt_peak_pct_mvc": 0.15,
+          "delt_share": 0.1
+        },
+        {
+          "rep": 2,
+          "biceps_peak_pct_mvc": 1,
+          "biceps_mean_pct_mvc": 0.79,
+          "delt_peak_pct_mvc": 0.19,
+          "delt_share": 0.09
+        },
+        {
+          "rep": 3,
+          "biceps_peak_pct_mvc": 1,
+          "biceps_mean_pct_mvc": 0.8,
+          "delt_peak_pct_mvc": 0.22,
+          "delt_share": 0.1
+        }
+      ],
+      "avg_delt_share": 0.1
+    },
+    {
+      "exercise": "standing band curl",
+      "variant": "standing",
+      "style_instructed": "cheat (swing)",
+      "reps": [
+        {
+          "rep": 1,
+          "biceps_peak_pct_mvc": 1,
+          "biceps_mean_pct_mvc": 0.77,
+          "delt_peak_pct_mvc": 0.35,
+          "delt_share": 0.2
+        },
+        {
+          "rep": 2,
+          "biceps_peak_pct_mvc": 0.54,
+          "biceps_mean_pct_mvc": 0.25,
+          "delt_peak_pct_mvc": 0.99,
+          "delt_share": 0.63
+        },
+        {
+          "rep": 3,
+          "biceps_peak_pct_mvc": 1,
+          "biceps_mean_pct_mvc": 0.69,
+          "delt_peak_pct_mvc": 1,
+          "delt_share": 0.47
+        },
+        {
+          "rep": 4,
+          "biceps_peak_pct_mvc": 1,
+          "biceps_mean_pct_mvc": 0.8,
+          "delt_peak_pct_mvc": 1,
+          "delt_share": 0.53
+        }
+      ],
+      "avg_delt_share": 0.46
+    }
+  ],
+  "holds": {
+    "front_raise_r_delt_mean_raw": 7412,
+    "side_raise_r_delt_mean_raw": 10131,
+    "takeaway": "Delt pad sits toward the middle delt; move about a finger-width forward for a stronger front-delt signal."
+  },
+  "coach_takeaways": [
+    "Strict reps: delt share about 0.1. Swing reps: about 0.46. The swing is obvious in the data.",
+    "Swing reps used less biceps than strict reps (momentum did the work).",
+    "Biceps hits the sensor ceiling on hard reps; turn the gain down or trust calibration."
+  ],
+  "raw_csv": "raw/2026-11-13-bench.csv"
+}

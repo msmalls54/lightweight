@@ -76,6 +76,11 @@ Do the parts in order. Tick each box. If something looks wrong, stop and tell Cl
 
 ## Part 3: Sensor on your arm + power bank test
 
+> **Update (Nov 13 night): the shield covers the LED grid, so you can't see the bars.** Use one of these instead:
+> - **No laptop:** watch the small **ENV light on the Link Shield / sensor**. It gets brighter when the muscle flexes.
+> - **Numbers:** unplug the laptop's **wall charger** (laptop on battery only), plug the UNO into the laptop, run `arduino-cli monitor -p COM8 -c baudrate=115200`. Four columns = A0 A1 A2 A3. Flex and watch the first column jump. Ctrl+C to stop.
+> - **Delt test (most important):** second sensor + Link Shield on the **right front delt**, cable in **A1**. Strict curl: column 2 stays low. Swung curl: column 2 jumps.
+
 1. [ ] Plug the UNO's USB cable into the **power bank** instead. The blinking corner dot should come back.
    - If the power bank turns itself off within a minute, write that down; you'll need a different power bank or its "low current" mode.
 2. [ ] Pick your **right biceps**. If it's hairy, shave a patch about the size of a credit card.
@@ -168,7 +173,6 @@ The UNO only works on **2.4 GHz** Wi-Fi. Phone hotspots default to 5 GHz on some
 
 1. [ ] **API keys:** in the `lightweight` folder, create a file named `.env` (Notepad → Save As → File name `.env`, "Save as type: All files"). Put in:
    ```
-   ELEVENLABS_API_KEY=your-key-here
    GEMINI_API_KEY=your-key-here
    ```
    Save. This file is never committed to git.

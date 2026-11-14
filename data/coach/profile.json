@@ -1,0 +1,24 @@
+{
+  "_note": "Who the coach is coaching. Fields marked TODO are for Mike to fill in. The coach reads this; code never makes cheat decisions from it.",
+  "name": "Mike",
+  "height": "6 ft",
+  "bodyweight_lb": 205,
+  "training_split": "Push/Pull/Legs, each twice a week (6 days). Curls live on pull days.",
+  "nutrition_phase": "Cutting, about 500 kcal/day deficit",
+  "main_lift": "preacher curl (EZ bar or dumbbell)",
+  "demo_lift": "standing band curl",
+  "goals": ["TODO: e.g. bigger biceps, fix left/right imbalance, stop swinging the last reps"],
+  "known_weak_points": ["TODO: e.g. left arm lags, shoulders roll forward when tired"],
+  "injuries_or_limits": ["TODO: none, or list"],
+  "typical_working_weights": {
+    "preacher_curl_ez_bar_lb": "TODO",
+    "dumbbell_curl_lb": 35,
+    "band": "TODO: band color or resistance"
+  },
+  "coaching_style": "blunt gym coach, short sentences, no medical language, roast the cheat reps a little",
+  "sensor_notes": {
+    "r_delt_pad": "Sits toward the middle delt; about a finger-width forward is better for curls.",
+    "biceps_gain": "Saturates on hard reps at current gain.",
+    "link_shield_switch": "Flat ~8,150 on a channel means it is on RAW, not ENV."
+  }
+}

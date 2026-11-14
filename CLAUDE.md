@@ -37,6 +37,23 @@ One lift family, done well: **curls**. Mike's real-life lift is the **preacher c
 
 **No IMU and no LED strip in this build.** Reps come from the EMG envelope. On-body lights are the UNO's LED matrix.
 
+> **Finding Nov 13 (night):** the MyoWare Arduino Shield **fully covers the UNO's LED matrix** once stacked. The matrix is NOT visible on-body. On-body light = each sensor's / Link Shield's built-in ENV LED (brightens with flex). Live bars move to the laptop dashboard + muscle-map widget. Treat "LED matrix bars" items below as dropped unless a workaround is found. Possible no-solder workaround: shield beside the UNO, wired with male-to-female jumper wires (5V, GND, A0–A3); check the shield's pin labels first.
+
+> **Bench results Nov 13 (night), real sensors, ENV mode, 14-bit raw values:**
+> - **Concept proven: the delt snitch works.** Same session, standing band curls, R biceps on A0, delt on A1:
+>
+>   | Phase | Biceps avg | Delt avg | Delt peak |
+>   |---|---|---|---|
+>   | Rest | ~570 | ~500 | ~550 |
+>   | Strict curls | 5,876 | **1,092** | 3,697 |
+>   | Cheat (swing) curls | 4,058 | **3,665** | 14,944 |
+>
+>   Rest-subtracted delt_share ≈ **0.10 strict vs ≈ 0.48 cheat**. Cheat reps also use less biceps (momentum).
+> - **Rest baseline ≈ 500–600** per channel; ENV ceiling ≈ **14,960** (saturation). Biceps hard flex saturates at current gain: consider a gain turn-down (pot is likely under the Link Shield) or rely on calibration.
+> - **Link Shield output switch is easy to misread.** A channel sitting flat at **~8,150 (half-scale)** = it's on RAW, not ENV. Slide the switch to the other end.
+> - **Delt placement:** 2 finger-widths below the bony shoulder tip, on the bulge, pointing down the arm. Too close to the collarbone = almost no signal. Current spot reads side raise (10,131) > front raise (7,412), so it sits toward the middle delt; it still catches the swing.
+> - Envelope decays slowly after a hard rep (relax phases right after flexing read high for 1–2 s). Rep-end hysteresis must allow for it.
+
 ### Channel map (label the cables!)
 | Jack | Muscle | Role |
 |---|---|---|
@@ -52,12 +69,14 @@ Already installed on this laptop; don't reinstall.
 - **Arduino:** `arduino-cli` 1.5.1 + core `arduino:renesas_uno` 1.6.0. FQBN `arduino:renesas_uno:unor4wifi`. `WiFiS3`, `Arduino_LED_Matrix` (bundled) and `ArduinoJson` 7.4.3 compile together. `ArduinoGraphics` 1.1.5 installed for matrix text.
 - **UNO bench-tested Nov 13:** shows up on **COM8**, uploads in ~4 s. Wi-Fi module firmware 0.6.0 (= latest, no update needed); scans 2.4 GHz fine. Timing: 4-channel 14-bit `analogRead` = ~100 µs, LED matrix render = ~50 µs; a 200 Hz `micros()` loop with a matrix render every 10th tick ran 1000 ticks, worst 4 µs late, 0 missed. CPU is not a constraint.
 - **Firewall:** inbound allow rules for `node.exe` already exist (Public profile, plus a TCP 3000 rule from helmet-agent), so the UNO can reach the laptop server over a hotspot.
-- **Node:** v24.15.0, npm 11.12.1. These are in the npm cache, so `npm install --prefer-offline` works on bad Wi-Fi: `mcp-use@1.34.8`, `better-sqlite3@13.0.3`, `zod@4.6.7`, `react`/`react-dom@19.3.1`, `@mcp-use/tunnel@0.2.2`, `@elevenlabs/elevenlabs-js@2.78.0`, `@google/genai@3.3.0`, dev: `tsx@4.23.15`, `typescript@5.9.3`, `@types/node@^22`, `@types/better-sqlite3@9.6.0`, `@types/react*@19.3.0`. Use helmet-agent's `overrides` block (`@modelcontextprotocol/sdk` 1.32.1, `@hono/node-server` 1.19.17, `hono` 4.13.13).
+- **Node:** v24.15.0, npm 11.12.1. These are in the npm cache, so `npm install --prefer-offline` works on bad Wi-Fi: `mcp-use@1.34.8`, `better-sqlite3@13.0.3`, `zod@4.6.7`, `react`/`react-dom@19.3.1`, `@mcp-use/tunnel@0.2.2`, `@elevenlabs/elevenlabs-js@2.78.0` (not used: voice is Gemini), `@google/genai@3.3.0`, dev: `tsx@4.23.15`, `typescript@5.9.3`, `@types/node@^22`, `@types/better-sqlite3@9.6.0`, `@types/react*@19.3.0`. Use helmet-agent's `overrides` block (`@modelcontextprotocol/sdk` 1.32.1, `@hono/node-server` 1.19.17, `hono` 4.13.13).
 - **Tunnels:** `cloudflared` 2026.10.1 (quick tunnel, no account). `ngrok` 3.39.13 via winget; no authtoken configured yet.
-- **Secrets** (ElevenLabs, Gemini, ngrok) go in `.env`, which is gitignored. Never commit keys.
+- **Secrets** (Gemini, ngrok) go in `.env`, which is gitignored. Never commit keys.
 
 ## Network
 UNO R4 WiFi is **2.4 GHz only**. Expect venue Wi-Fi to fail (same as Thump at YC). Plan: laptop or phone hotspot on 2.4 GHz; UNO joins that; laptop server listens on the hotspot IP.
+
+**Verified at the venue (Nov 14, YC):** venue Wi-Fi "Y Combinator" is 5/6 GHz only, so the UNO can't use it. Working setup: iPhone hotspot **"iPhone (99)"** (2.4 GHz), laptop joined to it at **172.20.10.2**, UNO gets **172.20.10.4**. UNO → laptop HTTP on port 3000 works, round-trip **~90–165 ms**, RSSI -18 to -28. Credentials live only in the gitignored `bench/hotspot_test/arduino_secrets.h`; reuse that file's values for the real firmware's secrets.
 
 ## Architecture
 ```
@@ -68,8 +87,8 @@ Laptop server (Node + TypeScript, same stack as helmet-agent):
    receiver -> SQLite (sessions/sets/reps/samples)
    signal engine: calibration, rep detection, scoring, flags (pure code)
    live dashboard (localhost): muscle map + bars + music player + voice
-   voice: ElevenLabs TTS, music ducking (Web Audio)
-   agent: Gemini writes call-outs/summaries, answers questions
+   voice: Gemini TTS (no ElevenLabs at this event), music ducking (Web Audio)
+   agent: Gemini 4 Hydrogen writes summaries, answers questions
    MCP server (mcp-use) + muscle-map widget -> Claude/ChatGPT
 ```
 
@@ -105,15 +124,25 @@ Reference repo for patterns (copy structure, not hit logic): `github.com/msmalls
 ## Voice + music
 - Dashboard plays a playlist (local files) through the Bluetooth speaker.
 - On a flagged rep: duck music to ~20% over 150 ms, play the call-out, restore over 400 ms.
-- Latency trick: **pre-generate ElevenLabs clips** at startup for fixed phrases ("rep one" … "rep twenty", "delt took over", "elbows in", "clean rep", "left side's slacking") and stitch them, so mid-set call-outs don't wait on Gemini + TTS. Use live Gemini + TTS for set summaries and Q&A only.
+- **TTS = Gemini** (decided Nov 14 at the venue: no ElevenLabs here). Via `@google/genai`, response modality audio + `speechConfig.voiceConfig` with a prebuilt voice. Output is **raw PCM, 24 kHz, mono, 16-bit**: wrap it in a WAV header before playing. TTS model IDs seen Nov 14: `gemini-3.8-flash-lite-tts` (low latency, preferred), `gemini-3.8-flash-tts` (higher fidelity), `gemini-3.1-flash-tts-preview`. Check https://ai.google.dev/gemini-api/docs/speech-generation and use whatever the key accepts.
+- Latency trick: **pre-generate Gemini TTS clips** at startup (cache the WAVs to disk so restarts are instant) for fixed phrases ("rep one" … "rep twenty", "delt took over", "elbows in", "clean rep", "left side's slacking") and stitch them, so mid-set call-outs don't wait on Gemini + TTS. Use live Gemini + TTS for set summaries and Q&A only.
 - Cooldown: at most one call-out per ~3 s; never talk over yourself.
 - Talking back uses the **laptop mic**, not the earbud/speaker mic (Bluetooth headset mode wrecks audio quality).
 - Spotify ducking is a stretch goal only.
 
 ## Agent (Gemini)
-- Use the current fast Gemini model; check the docs at the event, don't hardcode from memory.
+- **Brain = Gemini 4 Hydrogen** (decided Nov 14: Google's fast, low-latency Gemini 4 model, built for agentic/high-throughput work; cheaper and faster than Gemini 4 Carbon). Get the exact model ID from `ai.models.list()` with our key or AI Studio; don't guess the string. Put it in one config constant.
+- **Voice = a Gemini TTS model**, separate from Hydrogen (Hydrogen is text-only). Prefer the low-latency **`gemini-3.8-flash-lite-tts`**; fall back to `gemini-3.8-flash-tts` or whatever TTS ID the key accepts.
 - Inputs: structured rep/set records from SQLite. Output: one-line cue or short summary. Tone: blunt gym coach, no medical language.
 - Q&A examples it must handle: "How was that set?", "Which rep did I cheat?", "Which arm is weaker?", "Compare my last two sets."
+
+## Coach context (the coach knows you, your plan, and last time)
+A coach is only a coach if it remembers. Files in `data/coach/`:
+- `profile.json`: who Mike is, main lift, goals, weak points, coaching style, sensor quirks (TODO fields for Mike).
+- `plan.json`: program rules (rep range, max cheat reps, progression and deload rules, imbalance target) + today's planned sets.
+- `history/YYYY-MM-DD.json`: one summary per day (per-set, per-rep %MVC, delt_share, takeaways). `history/2026-11-13.json` is **real**: last night's bench test (strict ≈ 0.10 delt share, swing ≈ 0.46), raw samples in `history/raw/`.
+
+Server builds ONE context packet, `buildCoachContext()`, = profile + plan rules + today's planned vs done sets + the most recent history day's takeaways + the live/last set. It's passed to Gemini 4 Hydrogen for every summary/Q&A and exposed over MCP. At session end, the server writes today's `history/2026-11-14.json` from SQLite (code computes the numbers; Hydrogen may add one line of takeaways). Coach lines it should be able to say: "Last time your swing reps were 46% delt; today you're at 22%, nice." / "Plan says 10 reps; you cheated rep 7 and 8, so same weight next time."
 
 ## MCP tools (mcp-use, same pattern as Thump)
 | Tool | Does |
@@ -125,7 +154,12 @@ Reference repo for patterns (copy structure, not hit logic): `github.com/msmalls
 | `compare_arms` | L vs R biceps share across sets |
 | `compare_curls` | rank curl variants by biceps %MVC per rep, cheat rate, L/R balance (same session only) |
 | `challenge_status` | beat-the-agent scoreboard |
+| `get_coach_context` | the context packet above: profile, plan, today vs plan, last session |
+| `get_history` | day summaries (default: last 7 days), incl. the real Nov 13 bench test |
+| `update_plan` | change today's targets/weights (e.g. "bump band curls to 12 reps"); writes `plan.json` |
 
+Muscle-map body art is ready in `assets/muscle-map/`: `anterior.json` = 33 front-view polygons (viewBox 0 0 100 200) tagged `muscle` + `side` (right/left/center, person's side; front view so person's right is on the viewer's left), extracted from react-body-highlighter@2.0.5 (MIT, license file alongside; keep it). `preview.html` shows the 4 tracked muscles shaded by %MVC with sliders. Draw polygons directly (the library itself lights both sides together, so don't use its component).
+**mcp-use widget wiring (copy helmet-agent's pattern exactly):** React component at `server/resources/muscle-map/widget.tsx`; the tool declares `widget: { name: "muscle-map", invoking: "Opening the muscle map…", invoked: "Muscle map shown" }` and its handler returns `widget({ props: {...rep/set data...}, message: "<one-line summary for the model>" })` (import `MCPServer, widget` from `"mcp-use/server"`). Reference: helmet-agent `server/src/cloud-demo.ts` (`show_last_hit` → `resources/helmet/widget.tsx`). `show_last_set` and `compare_arms` should both return this widget. Keep heavy aggregation in SQLite, not in the widget.
 Muscle-map widget: front body outline; tracked muscles (L/R biceps, L/R front delt) shaded red by %MVC; untracked muscles stay gray (never imply we measured them). Views: last rep, last set, session cumulative.
 
 ## Demo
@@ -133,7 +167,7 @@ Muscle-map widget: front body outline; tracked muscles (L/R biceps, L/R front de
 2. **Beat the agent:** a judge whispers "clean" or "cheat" before each rep; the agent calls it before the reveal. Goal 5/5.
 3. Walk-ups: one arm, 2 sensors (biceps + delt), fresh pads, 60 s setup, 5 reps, scoreboard.
 
-Sponsors: **ElevenLabs** (voice, the core), **Gemini/DeepMind** (agent brain; stretch: phone camera so it sees + feels the rep). Stripe optional: test-mode "$1 to challenge, beat it and get $5 back." Skip Brex.
+Sponsors: **Gemini/DeepMind** (agent brain **and** voice via Gemini TTS; stretch: phone camera so it sees + feels the rep). No ElevenLabs at this event. Stripe optional: test-mode "$1 to challenge, beat it and get $5 back." Skip Brex.
 
 ## Priorities (cut from the bottom)
 - **P0:** firmware streaming 4ch -> server -> SQLite; calibration; rep detection; cheat flag; pre-generated voice call-out; dashboard bars; pre-recorded fallback session.
