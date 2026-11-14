@@ -105,12 +105,12 @@ test("summarizeSet uses the brain, and passes facts + decision", async () => {
   let seen = "";
   setBrain(async (_sys, prompt) => {
     seen = prompt;
-    return "**Seven reps**, delt took over from rep six. Stop at the first cheat and rest longer.";
+    return "**Reps six and seven**: your delt took over at 46 percent. Stop at the first cheat and rest longer.";
   });
   const s = swingSet();
   const ctx = buildCoachContext({ person: "Mike", todaySets: [s], dataDir: DATA });
   const line = await summarizeSet(ctx, s);
-  assert.equal(line, "Seven reps, delt took over from rep six. Stop at the first cheat and rest longer.");
+  assert.equal(line, "Reps six and seven: your delt took over at 46 percent. Stop at the first cheat and rest longer.");
   assert.match(seen, /"first_cheat_rep":6/);
   assert.match(seen, /stop at the first cheat/i);
   assert.match(seen, /LAST_SESSION: \{"date":"2026-11-13"/);
@@ -140,9 +140,9 @@ test("mentionsLoadChange", () => {
 test("fallbackSummary phrases the decision", () => {
   assert.equal(
     fallbackSummary(swingSet()),
-    "7 reps, 2 cheats, delt took over from rep 6. Next set, stop at the first cheat and rest longer.",
+    "Reps 6 and 7: your delt took over, 46 percent delt share. Next set, stop at the first cheat and rest longer, same weight.",
   );
-  assert.match(fallbackSummary(set([rep(), rep()])), /^2 reps, all clean, delt share 10 percent\. Same weight/);
+  assert.match(fallbackSummary(set([rep(), rep()])), /^2 reps, all clean\. Same weight/);
 });
 
 test("writeTodayHistory writes code numbers; walk-ups skipped", () => {

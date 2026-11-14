@@ -1,5 +1,6 @@
 // Live smoke test for ④ voice + coach brain. Hits the real Gemini API.
-//   npx tsx scripts/voice-smoke.ts          3 clips + Hydrogen Q&A + set summary
+//   npx tsx scripts/voice-smoke.ts          3 clips + Hydrogen Q&A + spoken/detail summaries of Mike's real Nov 14 sets
+//   (never plays audio: WAVs are written to server/.cache/voice-smoke/)
 //   npx tsx scripts/voice-smoke.ts --all    also pre-generate every clip into server/.cache/voice
 import fs from "node:fs";
 import path from "node:path";
@@ -7,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { CLIPS, DEFAULT_VOICE_CACHE, initVoice, loadGeminiKey, wavDurationMs } from "../src/voice/index.js";
 import { geminiSynth } from "../src/voice/tts.js";
 import { BRAIN_MODEL, TTS_MODEL, voiceId } from "../src/voice/models.js";
-import { answer, buildCoachContext, summarizeSet, type RepEvent, type SetEndEvent } from "../src/coach/index.js";
+import { answer, buildCoachContext, fallbackSummary, summarizeSet, summarizeSetDetail, type SetEndEvent } from "../src/coach/index.js";
 
 const key = loadGeminiKey();
 if (!key) {
@@ -33,23 +34,34 @@ let t = Date.now();
 const a = await answer(ctx, q);
 console.log(`\nQ: ${q}\nA (${Date.now() - t} ms): ${a}`);
 
-// A synthetic set like the demo: 7 reps, delt takes over from rep 6.
-const rep = (n: number, cheat: boolean): RepEvent => ({
-  type: "rep", set_id: "smoke", arm: "R", rep: n, start_ms: n * 2500, end_ms: n * 2500 + 1800,
-  peak_pct: [0.95, cheat ? 0.7 : 0.18, 0, 0], mean_pct: [cheat ? 0.55 : 0.75, cheat ? 0.45 : 0.08, 0, 0],
-  delt_share: cheat ? 0.45 : 0.1, baseline_delt_share: 0.1, cheat, cheat_reason: cheat ? "delt_share_jump" : null,
-  r_share: null, up_ms: 800, down_ms: 1000,
-});
-const reps = [1, 2, 3, 4, 5, 6, 7].map((n) => rep(n, n >= 6));
-const set: SetEndEvent = {
-  type: "set_end", set_id: "smoke", reps, clean: 5, cheats: 2, first_cheat_rep: 6,
-  decision: { next: "continue", reason: "2 cheat reps (plan allows 1) but delt took over after rep 5; same weight" },
-};
-const ctx2 = buildCoachContext({ person: "Mike", todaySets: [set] });
-t = Date.now();
-console.log(`\nsummarizeSet (${"…"}): ${await summarizeSet(ctx2, set)}  [${Date.now() - t} ms]`);
-t = Date.now();
-console.log(`answer "Which rep did I cheat?": ${await answer(ctx2, "Which rep did I cheat?")}  [${Date.now() - t} ms]`);
+// Mike's real live set (Nov 14 12:25, session s-1114-122526-r82). No audio playback: WAVs go to disk only.
+const fx = JSON.parse(
+  fs.readFileSync(fileURLToPath(new URL("../src/coach/fixtures/real-session-s-1114-122526-r82.json", import.meta.url)), "utf8"),
+) as { sets: { set_no: number; set_end: SetEndEvent; coach_line_at_the_time: string }[] };
+const realSets = fx.sets.map((s) => s.set_end);
+for (const s of fx.sets) {
+  const sctx = buildCoachContext({ person: "Mike", todaySets: realSets.slice(0, s.set_no) });
+  console.log(`\n=== real set ${s.set_no}: ${s.set_end.reps.length} reps, cheats ${JSON.stringify(s.set_end.reps.filter((r) => r.cheat).map((r) => r.rep))}`);
+  console.log(`before:  ${s.coach_line_at_the_time}`);
+  t = Date.now();
+  const line = await summarizeSet(sctx, s.set_end);
+  const tLine = Date.now() - t;
+  console.log(`spoken (${tLine} ms, ${line.split(/\s+/).length} words, ${line === fallbackSummary(s.set_end) ? "CODE FALLBACK" : "gemini"}): ${line}`);
+  t = Date.now();
+  const wav = await synth(line);
+  const ttsMs = Date.now() - t;
+  fs.writeFileSync(path.join(outDir, `real-set-${s.set_no}-summary.wav`), wav);
+  console.log(`  TTS ${ttsMs} ms -> ${wavDurationMs(wav)} ms of speech`);
+  t = Date.now();
+  const d = await summarizeSetDetail(sctx, s.set_end);
+  console.log(`detail (${Date.now() - t} ms, source ${d.source}):\n  headline: ${d.headline}\n${d.bullets.map((b) => "  - " + b).join("\n")}\n  cue: ${d.cue}`);
+}
+const ctx2 = buildCoachContext({ person: "Mike", todaySets: realSets });
+for (const q2 of ["Which rep did I cheat?", "Which arm is weaker?", "Compare my last two sets."]) {
+  t = Date.now();
+  const ans = await answer(ctx2, q2);
+  console.log(`\nanswer "${q2}" (${Date.now() - t} ms): ${ans}`);
+}
 
 const walk = buildCoachContext({ person: "Priya", todaySets: [] });
 t = Date.now();
