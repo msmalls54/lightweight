@@ -24,7 +24,9 @@ export function addGuard(app: Hono<any, any, any>, publicOrigin?: () => string |
     let peer: string | undefined;
     try { peer = getConnInfo(c).remote.address; } catch { /* no real socket in unit tests */ }
     if (!LOOPBACK.includes(peer ?? "")) return c.json({ error: "Dashboard and MCP are available only on this laptop." }, 403);
-    if (!originAllowed(c.req.header("Origin"), publicOrigin?.())) return c.json({ error: "Origin not allowed." }, 403);
+    // Widget assets are fetched by Claude's sandboxed iframe (foreign Origin); they're static and read-only.
+    const widgetAsset = (c.req.method === "GET" || c.req.method === "HEAD") && (c.req.path.startsWith("/mcp-use/widgets/") || c.req.path.startsWith("/mcp-use/public/"));
+    if (!widgetAsset && !originAllowed(c.req.header("Origin"), publicOrigin?.())) return c.json({ error: "Origin not allowed." }, 403);
     return next();
   });
   const deviceBody = bodyLimit({ maxSize: 32 * 1024, onError: c => c.json({ error: "Body too large" }, 413) });
