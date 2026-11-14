@@ -12,7 +12,7 @@ interface Player {
   playClip(k: string | string[]): Promise<boolean>;
   say(text: string, opts?: { fallbackMs?: number }): Promise<boolean>;
   coachText(setId: string, text: string): void;
-  coachAudio(setId: string, msg: { ok?: boolean; text?: string; fallback_clip?: string }): Promise<boolean>;
+  coachAudio(setId: string, msg: { ok?: boolean; text?: string; spoken?: string; fallback_clip?: string }): Promise<boolean>;
   fallbackMs: number;
   cooldownMs: number;
   ready: Promise<unknown>;
@@ -23,6 +23,12 @@ interface Player {
 function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {}) {
   const log: string[] = [];
   const spoken: { text: string; voice?: string; rate?: number }[] = [];
+  const sayBodies: string[] = [];
+  // How many voices are audible at once (Web Audio sources + browser utterances); must never exceed 1.
+  const live = { now: 0, max: 0 };
+  const on = () => { live.now++; live.max = Math.max(live.max, live.now); };
+  const off = () => { live.now--; };
+  const synth = { speaking: null as null | { onend?: () => void; timer: ReturnType<typeof setTimeout> } };
   const music = { volume: 0.8 };
   const minVol = { v: 1 };
   const sandbox: Record<string, unknown> = {
@@ -47,10 +53,11 @@ function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {
         this.detail = i.detail;
       }
     },
-    fetch: async (url: string) => {
+    fetch: async (url: string, init?: { body?: string }) => {
       if (url === "/voice/clips") return { ok: true, json: async () => ({ keys: ["set_done", "two_cheats", "rep_1", "nice_set"] }) };
       if (url.startsWith("/voice/clip/")) return { ok: true, arrayBuffer: async () => ({ clip: url }) };
       if (url === "/voice/say") {
+        sayBodies.push(JSON.parse(init?.body ?? "{}").text);
         await sleep(o.sayDelayMs ?? 10);
         return { ok: true, arrayBuffer: async () => ({ say: true }) };
       }
@@ -67,7 +74,8 @@ function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {
           connect() {},
           start() {
             log.push("play:" + src.buffer!.name);
-            setTimeout(() => src.onended?.(), o.clipMs ?? 20);
+            on();
+            setTimeout(() => (off(), src.onended?.()), o.clipMs ?? 20);
           },
         };
         return src;
@@ -82,11 +90,16 @@ function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {
         { name: "Microsoft David - English (United States)", lang: "en-US" },
         { name: "Google UK English Female", lang: "en-GB" },
       ],
-      cancel() {},
+      cancel() {
+        // Real browsers stop the current utterance on cancel().
+        if (synth.speaking) { clearTimeout(synth.speaking.timer); const u = synth.speaking; synth.speaking = null; off(); u.onend?.(); }
+      },
       speak(u: { text: string; voice?: { name: string }; rate?: number; onend?: () => void }) {
         spoken.push({ text: u.text, voice: u.voice?.name, rate: u.rate });
         log.push("browser:" + u.text);
-        setTimeout(() => u.onend?.(), o.speechMs ?? 20);
+        on();
+        const entry = { onend: u.onend, timer: setTimeout(() => { if (synth.speaking === entry) { synth.speaking = null; off(); } u.onend?.(); }, o.speechMs ?? 20) };
+        synth.speaking = entry;
       },
     },
     SpeechSynthesisUtterance: class {
@@ -104,7 +117,7 @@ function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {
   vm.runInContext(SRC, sandbox);
   const A = sandbox.LWAudio as Player;
   A.setMusic(music);
-  return { A, log, spoken, events, music, minVol };
+  return { A, log, spoken, events, music, minVol, sayBodies, live };
 }
 
 test("playClip ducks music to 20% and restores it", async () => {
@@ -191,12 +204,9 @@ test("voices never overlap: set-end clips, then the browser line", async () => {
 test("coach lines: only the first sentence is spoken (Gemini and browser), full text stays on screen", async () => {
   const line = "Reps 4 and 8: right shoulder at 9 times normal, that's a swing. Rep 5 smaller. Next set, stop at the first cheat.";
   const a = load({ sayDelayMs: 5 });
-  const said: string[] = [];
-  const realSay = a.A.say.bind(a.A);
-  a.A.say = (t: string, o?: { fallbackMs?: number }) => (said.push(t), realSay(t, o));
   a.A.coachText("s1", line);
   await a.A.coachAudio("s1", { ok: true, text: line });
-  assert.deepEqual(said, ["Reps 4 and 8: right shoulder at 9 times normal, that's a swing."]);
+  assert.deepEqual(a.sayBodies, ["Reps 4 and 8: right shoulder at 9 times normal, that's a swing."]);
   const b = load();
   b.A.fallbackMs = 20;
   b.A.coachText("s2", line);
@@ -220,4 +230,48 @@ test("spokenPart is the same in the browser and on the server", async () => {
   }
   assert.equal(spokenPart("From rep 6 on, your right shoulder took over, 8 to 12 times normal, and it never came back down after that point. Next set."),
     "From rep 6 on, your right shoulder took over, 8 to 12 times normal.");
+});
+
+
+test("REPRO live bug: coach text at t0, Gemini audio at t0+5.1 s -> exactly one voice (7 s clock)", async () => {
+  const line = "Reps 6, 7, and 9: mild cheats, shoulders at 1 to 2 times normal. Next set, stop at the first cheat and rest longer.";
+  const { A, log, live, sayBodies } = load({ sayDelayMs: 1, clipMs: 900, speechMs: 300 });
+  await A.ready;
+  assert.equal(A.fallbackMs, 7000);
+  A.playClip(["set_done", "three_cheats"]); // instant set-end clips, still playing when the text lands
+  A.coachText("set-x", line); // t0
+  A.coachText("set-x", line); // a duplicate event must not start a second clock
+  await sleep(5100);
+  await A.coachAudio("set-x", { ok: true, text: line, spoken: "Reps 6, 7, and 9: mild cheats, shoulders at 1 to 2 times normal." });
+  await A.coachAudio("set-x", { ok: true, text: line }); // a duplicate audio event is dropped too
+  await sleep(2600); // past the 7 s mark: no browser voice may start
+  assert.deepEqual(log, ["play:set_done", "play:three_cheats", "play:gemini-say"]);
+  assert.equal(sayBodies.length, 1);
+  assert.equal(live.max, 1);
+});
+
+test("Gemini audio later than the clock -> browser only, late audio dropped, never two voices", async () => {
+  const { A, log, live, events } = load({ sayDelayMs: 1, speechMs: 50 });
+  A.fallbackMs = 120;
+  A.coachText("set-y", "All 3 reps clean, shoulder in its normal range.");
+  await sleep(200);
+  assert.equal(await A.coachAudio("set-y", { ok: true, text: "All 3 reps clean, shoulder in its normal range." }), false);
+  await sleep(800);
+  assert.deepEqual(log, ["browser:All 3 reps clean, shoulder in its normal range."]);
+  assert.ok(events.includes("skip_late:coach:set-y"));
+  assert.equal(live.max, 1);
+});
+
+test("anything that arrives while a voice plays waits; stray browser speech is cancelled first", async () => {
+  const { A, log, live } = load({ sayDelayMs: 1, clipMs: 200, speechMs: 2000 });
+  await A.ready;
+  A.fallbackMs = 30;
+  A.coachText("set-z", "Every rep clean."); // browser voice at 30 ms, would run 2 s
+  await sleep(300);
+  const p1 = A.say("Twenty-nine of forty reps clean so far."); // Gemini line queued behind it
+  const p2 = A.say("Twenty-nine of forty reps clean so far."); // identical line twice: spoken once
+  assert.equal(await p2, false);
+  await p1;
+  assert.deepEqual(log, ["browser:Every rep clean.", "play:gemini-say"]);
+  assert.equal(live.max, 1);
 });
