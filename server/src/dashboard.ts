@@ -70,6 +70,8 @@ export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store
     return { set_id: ctx.set_id, ctx };
   }));
   app.post("/set/stop", wrap(() => { pipeline.stopSet(); return {}; }));
+  app.post("/set/countdown", wrap(async c => { const b = await body(c, setStartSchema); return pipeline.startCountdown(b); }));
+  app.post("/set/cancel", wrap(() => ({ cancelled: pipeline.cancelCountdown() })));
 
   app.post("/calibrate/begin", wrap(() => pipeline.calBegin()));
   app.post("/calibrate/capture", wrap(async c => { const b = await body(c, captureSchema); return pipeline.calCapture(b.step, b.ch, b.window_ms); }));

@@ -47,7 +47,7 @@ registerTools(server, lw.store, lw.pipeline);
 
 export default server;
 
-await server.listen(3000);
+await server.listen(Number(process.env.PORT) || 3000); // PORT for extra test instances (mcp-use dev --no-hmr ignores --port)
 
 let stopping = false;
 async function stop() {
