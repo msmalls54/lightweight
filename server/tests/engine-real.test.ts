@@ -106,7 +106,8 @@ test("real recording as one continuous stream: strict reps clean, swing reps fla
   assert.ok(strict.reps.length >= 3 && strict.reps.length <= 4);
   assert.equal(strict.cheats, 0);
   assert.ok(cheat.reps.length >= 4 && cheat.reps.length <= 5);
-  assert.ok(cheat.cheats >= 3);
+  // in one session the strict set's clean reference carries over, so even the light swing (rep 1) is caught
+  assert.equal(cheat.cheats, cheat.reps.length);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -171,5 +172,66 @@ for (const [name, cal] of Object.entries(CALS_35)) {
     assert.ok(rDelt(cheat) > 1.4 * rDelt(strict), `${rDelt(cheat)} vs ${rDelt(strict)}`);
     // both arms worked: r_share filled
     assert.ok(strict.reps.every((r) => r.r_share !== null));
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Nov 14 right arm only, 35 lb dumbbell: 5 strict reps, 3 swings. Columns t,ph,a0..a3 (~20 Hz).
+// Phase labels start ~2.5-3 s before the movement; only the signal decides, the labels just bound the sets.
+const CSV_R35 = new URL("../../data/coach/history/raw/2026-11-14-right-35lb-strict-vs-swing.csv", import.meta.url);
+const rowsR35 = readFileSync(CSV_R35, "utf8")
+  .trim()
+  .split(/\r?\n/)
+  .slice(1)
+  .filter((l) => l.trim())
+  .map((l) => {
+    const [t, ph, a0, a1, a2, a3] = l.split(",");
+    return { t: +t, ph, ch: [+a0, +a1, +a2, +a3] };
+  });
+
+function runSessionR35(mvc: number[]): Record<string, SetEndEvent> {
+  const e = new Engine();
+  e.setCalibration({ rest: [550, 620, 800, 900], mvc, ok: true, problems: [] });
+  const sets: Record<string, SetEndEvent> = {};
+  let cur = "";
+  rowsR35.forEach((r, i) => {
+    if ((r.ph === "STRICT" || r.ph === "CHEAT") && r.ph !== cur) {
+      const prev = e.endSet();
+      if (prev) sets[prev.set_id] = prev;
+      e.startSet({ session_id: "nov14r", set_id: r.ph, person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R"] });
+      cur = r.ph;
+    }
+    const dt = i + 1 < rowsR35.length ? rowsR35[i + 1].t - r.t : 50;
+    for (const ev of e.ingest({ device: "nov14r", seq: i, t0_ms: r.t, dt_ms: dt, ch: r.ch.map((x) => [x]) })) {
+      if (ev.type === "set_end") sets[ev.set_id] = ev;
+    }
+  });
+  const last = e.endSet();
+  if (last) sets[last.set_id] = last;
+  return sets;
+}
+
+const CALS_R35 = {
+  ceiling: [14960, 14960, 14960, 14960],
+  // MVC from the FLEX/RAISE holds: biceps ~10,000 (less than the curls reach), delt ~14,300
+  holds: [10000, 14300, 14960, 14960],
+};
+
+for (const [name, mvc] of Object.entries(CALS_R35)) {
+  test(`real 35 lb right arm (${name} MVC): 5 strict reps clean, 3 swings flagged on the up phase`, () => {
+    const { STRICT: strict, CHEAT: cheat } = runSessionR35(mvc);
+    assert.equal(strict.reps.length, 5);
+    assert.equal(strict.cheats, 0, strict.reps.map((r) => `${r.rep}:${r.up_delt_ratio}/${r.baseline_up_delt_ratio}`).join(" "));
+    assert.equal(cheat.reps.length, 3);
+    assert.equal(cheat.cheats, 3, cheat.reps.map((r) => `${r.rep}:${r.up_delt_ratio}/${r.baseline_up_delt_ratio}`).join(" "));
+    assert.equal(cheat.decision.next, "stop_at_first_cheat_rest_longer");
+    // On the way up the swing's delt works ~1.5-1.9x harder relative to the biceps than on strict reps...
+    const upMax = Math.max(...strict.reps.map((r) => r.up_delt_ratio!));
+    const upMin = Math.min(...cheat.reps.map((r) => r.up_delt_ratio!));
+    assert.ok(upMin > 1.3 * upMax, `strict up max ${upMax}, swing up min ${upMin}`);
+    // ...while the whole-rep share separates them far less (the delt also works lowering strict reps).
+    const shareMax = Math.max(...strict.reps.map((r) => r.delt_share));
+    const shareMin = Math.min(...cheat.reps.map((r) => r.delt_share));
+    assert.ok(shareMin - shareMax < 0.15, `share gap ${shareMin - shareMax}`);
   });
 }

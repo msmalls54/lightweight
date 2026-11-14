@@ -98,7 +98,7 @@ test("delt peak alone flags a rep", () => {
   // biceps works hard, so share stays low, but the delt spikes past 0.5
   // share and delt-level rules switched off so only the peak rule can fire
   const reps: SynthRep[] = [...presets.clean(3), { bi: 1.3, delt: 0.55 }];
-  const { end } = runSet(calibrated({ deltShareJump: 0.5, deltMeanJump: 5 }), reps);
+  const { end } = runSet(calibrated({ deltShareJump: 0.5, deltMeanJump: 5, upRatioJump: 5 }), reps);
   const last = end.reps[3];
   assert.ok(last.delt_share < 0.35);
   assert.equal(last.cheat, true);
@@ -134,6 +134,39 @@ test("a swing set right after a clean set is judged against the clean set (sessi
   assert.equal(runSet(e2, presets.heavySwing(4), { set_id: "swing", load_lb: 25 }).end.reps[0].baseline_delt_share, null);
   // ...and only within one session
   assert.equal(runSet(e, presets.heavySwing(4), { set_id: "s2", session_id: "s2" }).end.reps[0].baseline_delt_share, null);
+});
+
+test("heavy strict reps: delt working on the way DOWN is not a cheat", () => {
+  const { end } = runSet(calibrated(), presets.heavyEccentric(6), { load_lb: 35 });
+  assert.equal(end.reps.length, 6);
+  assert.equal(end.cheats, 0, end.reps.map((r) => `${r.delt_share}/${r.up_delt_ratio}`).join(" "));
+  assert.ok(end.reps.every((r) => r.delt_share > 0.35)); // whole-rep share looks high (Nov 13 swings were 0.2-0.66)...
+  assert.ok(end.reps.every((r) => r.up_delt_ratio! < 0.5)); // ...but the up phase is biceps-led
+});
+
+test("heavy swing: delt firing on the way UP is flagged by the up-phase rule", () => {
+  const { end } = runSet(calibrated(), [...presets.heavyEccentric(3), ...presets.heavySwingUp(3)], { load_lb: 35 });
+  assert.deepEqual(end.reps.map((r) => r.cheat), [false, false, false, true, true, true]);
+  for (const r of end.reps.slice(3)) {
+    assert.ok(r.up_delt_ratio! > 1.2, `up ratio ${r.up_delt_ratio}`);
+    assert.ok(r.baseline_up_delt_ratio! < 0.5);
+  }
+});
+
+test("milder heavy swing: whole-rep rules miss some, the up-phase rule gets all", () => {
+  const mild: SynthRep = { bi: 0.85, delt: 0.75, deltDown: 0.4 }; // up ratio ~0.88 vs ~0.44 clean
+  const reps = [...presets.heavyEccentric(3), mild, mild, mild];
+  const wholeRepOnly = runSet(calibrated({ upRatioJump: 5, fallbackUpRatio: 99 }), reps).end;
+  assert.equal(wholeRepOnly.cheats, 0, "whole-rep rules alone miss them");
+  const full = runSet(calibrated(), reps).end;
+  assert.deepEqual(full.reps.map((r) => r.cheat), [false, false, false, true, true, true]);
+  assert.ok(full.reps.slice(3).every((r) => r.delt_share - r.baseline_delt_share! < 0.15)); // share barely moves
+});
+
+test("no reference yet: a swing with delt above biceps on the way up is still flagged", () => {
+  const { end } = runSet(calibrated(), presets.heavySwingUp(3), { load_lb: 35 });
+  assert.equal(end.cheats, 3);
+  assert.equal(end.reps[0].baseline_up_delt_ratio, null);
 });
 
 test("known limit: a heavy swing from rep 1 with no clean reps yet isn't flagged", () => {
@@ -389,7 +422,7 @@ test("left arm only uses the left channels", () => {
 
 test("per-variant threshold overrides", () => {
   const reps: SynthRep[] = [...presets.clean(3), { bi: 1.0, delt: 0.45 }];
-  const peakOnly = { deltShareJump: 0.5, deltMeanJump: 5 };
+  const peakOnly = { deltShareJump: 0.5, deltMeanJump: 5, upRatioJump: 5 };
   assert.equal(runSet(calibrated(peakOnly), reps).end.cheats, 0);
   const strictPreacher = calibrated({ ...peakOnly, variantOverrides: { preacher: { deltPeakMax: 0.4, deltPeakJump: 0.3 } } });
   assert.equal(runSet(strictPreacher, reps, { variant: "preacher" }).end.cheats, 1);

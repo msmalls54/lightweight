@@ -18,7 +18,7 @@ import {
 interface Sample { t: number; pct: number[] }
 
 /** What a clean rep looks like for one arm: the reference cheats are measured against. */
-interface Ref { share: number; deltMean: number; deltPeak: number }
+interface Ref { share: number; deltMean: number; deltPeak: number; upRatio: number }
 interface ArmRep extends Ref { flagged: boolean }
 
 interface SetState {
@@ -42,16 +42,43 @@ const r3 = (x: number) => Math.round(x * 1000) / 1000;
 const EPS = 1e-9;
 
 /**
+ * Up (concentric) phase of one arm: delt mean / biceps mean while the biceps climbs from
+ * `from` x its peak to 90% of it. Not from the window start: on touch-and-go heavy reps the delt
+ * is still busy with the previous rep's lowering at the bottom.
+ */
+function upRatio(w: Sample[], arm: Arm, biPeak: number, from: number): number {
+  const { bi, delt } = ARM_CH[arm];
+  let end = 0;
+  while (end < w.length - 1 && w[end].pct[bi] < 0.9 * biPeak) end++;
+  let start = end;
+  while (start > 0 && w[start - 1].pct[bi] >= from * biPeak) start--;
+  if (start === end) start = Math.max(0, end - 1); // at least 2 samples when there are 2
+  let b = 0;
+  let d = 0;
+  for (let i = start; i <= end; i++) {
+    b += w[i].pct[bi];
+    d += w[i].pct[delt];
+  }
+  return b > EPS ? d / b : 0;
+}
+
+/**
  * Cheat call for one arm's rep, against that arm's clean reference (null = no clean reps yet).
- * - delt_share_jump: delt share above the reference by > deltShareJump (band curls: the delt is
- *   quiet on clean reps, so the share jumps), OR delt mean %MVC up >= deltMeanRatio x AND by
- *   >= deltMeanJump (heavy dumbbells: the delt works on clean reps too, and a swing raises delt
- *   AND biceps, so only the delt level separates them).
+ * - delt_share_jump ("delt took over"), any of:
+ *   - up phase: delt/biceps mean ratio from onset to the biceps peak (the concentric half) is
+ *     >= upRatioMult x the reference AND >= reference + upRatioJump. The main rule: a swing fires
+ *     the delt on the way UP; a strict heavy rep only uses it on the way down (stabilizing), which
+ *     dilutes any whole-rep number.
+ *   - whole rep: delt share above the reference by > deltShareJump (band curls), or delt mean
+ *     %MVC >= deltMeanRatio x the reference AND >= reference + deltMeanJump.
  * - delt_peak: delt peak above max(deltPeakMax, reference peak + deltPeakJump).
- * Without a reference only a blatant share (> fallbackShareMax) is flagged.
+ * Without a reference only blatant reps are flagged: up ratio > fallbackUpRatio or share > fallbackShareMax.
  */
 function judge(cur: Ref, ref: Ref | null, th: RepThresholds): RepEvent["cheat_reason"] {
-  if (ref === null) return cur.share > th.fallbackShareMax ? "delt_share_jump" : null;
+  if (ref === null) {
+    return cur.upRatio > th.fallbackUpRatio || cur.share > th.fallbackShareMax ? "delt_share_jump" : null;
+  }
+  if (cur.upRatio >= ref.upRatio * th.upRatioMult && cur.upRatio - ref.upRatio >= th.upRatioJump) return "delt_share_jump";
   if (cur.share > ref.share + th.deltShareJump) return "delt_share_jump";
   if (cur.deltMean >= ref.deltMean * th.deltMeanRatio && cur.deltMean - ref.deltMean >= th.deltMeanJump) return "delt_share_jump";
   if (cur.deltPeak > Math.max(th.deltPeakMax, ref.deltPeak + th.deltPeakJump)) return "delt_peak";
@@ -187,7 +214,10 @@ export class Engine {
     }
     // Within minGapMs of the last rep the start is deferred (not dropped): a rep that follows
     // straight on still counts once the gap has passed, a brief rebound doesn't.
-    if (sig >= th.hi && (s.lastRepEndT === null || x.t - s.lastRepEndT >= th.minGapMs)) {
+    // A new rep must also rise restartRise above the valley, so a tail lingering near the end
+    // level (or an MVC set too low, which lifts the valleys) doesn't start a fake rep.
+    const startLevel = Math.max(th.hi, s.valley + th.restartRise);
+    if (sig >= startLevel && (s.lastRepEndT === null || x.t - s.lastRepEndT >= th.minGapMs)) {
       s.phase = "rep";
       s.rep = s.pre;
       s.pre = [];
@@ -242,7 +272,12 @@ export class Engine {
 
     type Eval = { arm: Arm; cur: Ref; ref: Ref | null; reason: RepEvent["cheat_reason"] };
     const evals: Eval[] = working.map((arm) => {
-      const cur: Ref = { share: share(arm), deltMean: mean[ARM_CH[arm].delt], deltPeak: peak[ARM_CH[arm].delt] };
+      const cur: Ref = {
+        share: share(arm),
+        deltMean: mean[ARM_CH[arm].delt],
+        deltPeak: peak[ARM_CH[arm].delt],
+        upRatio: upRatio(w, arm, peak[ARM_CH[arm].bi], th.upPhaseFrom),
+      };
       const ref = this.setRef(s, arm) ?? this.sessionRef(s.ctx, arm);
       return { arm, cur, ref, reason: judge(cur, ref, th) };
     });
@@ -273,6 +308,8 @@ export class Engine {
       mean_pct: mean.map(r3),
       delt_share: r3(pick.cur.share),
       baseline_delt_share: pick.ref === null ? null : r3(pick.ref.share),
+      up_delt_ratio: r3(pick.cur.upRatio),
+      baseline_up_delt_ratio: pick.ref === null ? null : r3(pick.ref.upRatio),
       cheat: pick.reason !== null,
       cheat_reason: pick.reason,
       r_share: both && rl > EPS ? r3(mean[ARM_CH.R.bi] / rl) : null,
@@ -295,6 +332,7 @@ export class Engine {
       share: Math.max(...clean.map((r) => r.share)),
       deltMean: Math.max(...clean.map((r) => r.deltMean)),
       deltPeak: Math.max(...clean.map((r) => r.deltPeak)),
+      upRatio: Math.max(...clean.map((r) => r.upRatio)),
     };
   }
 

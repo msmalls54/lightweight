@@ -15,10 +15,20 @@ export interface RepThresholds {
    */
   endPeakFrac: number;
   endLevelMax: number;
+  /** A new rep starts at max(hi, valley since the last rep + restartRise). */
+  restartRise: number;
   /** Reps shorter than this (onset above `lo` → end) are discarded as blips. */
   minRepMs: number;
   /** After a rep ends, a new rep can't start for this long (refractory). */
   minGapMs: number;
+  /** Up phase = biceps climbing from this fraction of its rep peak to 90% of it. */
+  upPhaseFrom: number;
+  /** Cheat (main rule): up-phase delt/biceps ratio at least this many times the reference... */
+  upRatioMult: number;
+  /** ...and at least this much above it (both must hold). */
+  upRatioJump: number;
+  /** No reference yet: flag an up-phase delt/biceps ratio above this. */
+  fallbackUpRatio: number;
   /** Cheat: delt_share above the clean reference by more than this. */
   deltShareJump: number;
   /** Cheat: delt mean %MVC at least this many times the reference... */
@@ -78,12 +88,19 @@ export const DEFAULT_CONFIG: EngineConfig = {
   // Rep detection (tuned on data/coach/history/raw/2026-11-13-bench.csv).
   hi: 0.35,
   lo: 0.15,
-  endPeakFrac: 0.25,
-  endLevelMax: 0.25,
+  // End at 30% of the rep peak, between 0.15 and 0.4. Up to 0.4 because a too-low biceps MVC
+  // (FLEX hold < curls) lifts the valleys between heavy reps to ~0.3.
+  endPeakFrac: 0.3,
+  endLevelMax: 0.4,
+  restartRise: 0.2,
   // Spec says ~0.6 s. The real swing rep 2 (Nov 13) is only 0.50 s above lo, so 0.4 s.
   minRepMs: 400,
   minGapMs: 400,
-  // Cheat flag (tuned on the Nov 13 band CSV and the Nov 14 35 lb bilateral CSV).
+  // Cheat flag (tuned on the Nov 13 band CSV and the two Nov 14 35 lb CSVs).
+  upPhaseFrom: 0.3,
+  upRatioMult: 1.35,
+  upRatioJump: 0.15,
+  fallbackUpRatio: 1.2,
   deltShareJump: 0.15,
   deltMeanRatio: 1.5,
   deltMeanJump: 0.15,
@@ -129,8 +146,13 @@ export function thresholdsFor(cfg: EngineConfig, variant: Variant): RepThreshold
     lo: o.lo ?? cfg.lo,
     endPeakFrac: o.endPeakFrac ?? cfg.endPeakFrac,
     endLevelMax: o.endLevelMax ?? cfg.endLevelMax,
+    restartRise: o.restartRise ?? cfg.restartRise,
     minRepMs: o.minRepMs ?? cfg.minRepMs,
     minGapMs: o.minGapMs ?? cfg.minGapMs,
+    upPhaseFrom: o.upPhaseFrom ?? cfg.upPhaseFrom,
+    upRatioMult: o.upRatioMult ?? cfg.upRatioMult,
+    upRatioJump: o.upRatioJump ?? cfg.upRatioJump,
+    fallbackUpRatio: o.fallbackUpRatio ?? cfg.fallbackUpRatio,
     deltShareJump: o.deltShareJump ?? cfg.deltShareJump,
     deltMeanRatio: o.deltMeanRatio ?? cfg.deltMeanRatio,
     deltMeanJump: o.deltMeanJump ?? cfg.deltMeanJump,
