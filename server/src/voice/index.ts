@@ -274,6 +274,7 @@ function wavResponse(wav: Buffer, cache: boolean): Response {
  * POST /voice/say {text}     -> audio/wav (live TTS)
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const clipInFlight = new Map<string, Promise<Buffer | null>>();
 export function registerVoiceRoutes(app: Hono<any, any, any>): void {
   app.get("/voice/clips", (c) => c.json({ ...voiceStatus(), keys: Object.keys(CLIPS), texts: CLIPS }));
   // The dashboard polls this; if it changes after the tab loaded, the tab's JS is stale -> "Reload this tab".
@@ -282,7 +283,15 @@ export function registerVoiceRoutes(app: Hono<any, any, any>): void {
   app.get("/voice/clip/:file", async (c) => {
     const key = c.req.param("file").replace(/\.wav$/i, "");
     try {
-      const wav = await getClip(key);
+      // An uncached clip is generated in the background (one TTS call per key); the request answers
+      // within 3 s either way, so a TTS outage can't pile up hanging requests in the browser.
+      let gen = clipInFlight.get(key);
+      if (!gen) {
+        gen = getClip(key).finally(() => clipInFlight.delete(key));
+        gen.catch(() => {});
+        clipInFlight.set(key, gen);
+      }
+      const wav = await Promise.race([gen, new Promise<never>((_, rej) => setTimeout(() => rej(new Error("still generating")), 3000))]);
       if (!wav) return c.json({ error: `unknown clip '${key}'` }, 404);
       if (!isWav(wav)) return c.json({ error: "bad clip" }, 500);
       return wavResponse(wav, true);

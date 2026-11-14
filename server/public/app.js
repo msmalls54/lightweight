@@ -23,7 +23,8 @@
   let QUIET = false;
   try { QUIET = localStorage.getItem("lw.quiet") === "1"; } catch { /* storage blocked */ }
   let STALE = false; // ④: this tab's JS is older than the server's -> never speak (see checkBuild)
-  const silent = () => MUTED || QUIET || !isSpeaker || STALE;
+  // A stale build no longer silences the tab (the hub already keeps ONE speaker); it only asks for a reload.
+  const silent = () => MUTED || QUIET || !isSpeaker;
   const syncVoice = () => { try { window.LWAudio?.setEnabled?.(!silent()); } catch { /* ignore */ } };
   function speakFallback(text) {
     if (silent() || !("speechSynthesis" in window)) return;
@@ -400,10 +401,10 @@
       if (!BUILD0) BUILD0 = j.build;
       else if (j.build && j.build !== BUILD0 && !STALE) {
         STALE = true;
-        syncVoice();
+        dbg("stale_build", j.build);
         const d = document.createElement("div");
-        d.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:8px 12px;text-align:center;font:600 14px system-ui,sans-serif";
-        d.innerHTML = 'This tab is out of date, so its voice is off. <button style="margin-left:8px;font:inherit;padding:2px 10px;cursor:pointer">Reload this tab</button>';
+        d.style.cssText = "position:fixed;bottom:76px;left:24px;z-index:50;background:#F59E0B;color:#111;padding:6px 12px;border-radius:10px;font:600 13px Inter,system-ui,sans-serif";
+        d.innerHTML = 'Dashboard updated: reload between sets. <button style="margin-left:8px;font:inherit;padding:2px 10px;cursor:pointer">Reload</button>';
         d.querySelector("button").onclick = () => location.reload();
         document.body.appendChild(d);
       }
@@ -561,6 +562,7 @@
   /** Make THIS tab the speaker before a user action starts something (Start set, voice command, Test voice, New session). */
   async function claimSpeaker() {
     unlockAudio(); // inside the user gesture
+    dbg("claim", isSpeaker ? "already speaker" : MUTED ? "muted tab" : clientId ? "claiming" : "no client id yet");
     if (MUTED || isSpeaker || !clientId) return;
     try { await post("/speaker/claim", { client_id: clientId }); } catch { return; }
     for (let i = 0; i < 20 && !isSpeaker; i++) await sleep(50); // the server confirms over SSE
@@ -588,7 +590,7 @@
   function preloadCountdownVoice() {
     if (lead || silent()) return;
     lead = { audio: null, ms: 0 };
-    fetch("/voice/say", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: LEAD_TEXT }) })
+    fetch("/voice/say", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: LEAD_TEXT }), signal: AbortSignal.timeout?.(15000) })
       .then(r => (r.ok ? r.blob() : null)).then(b => {
         if (!b) { lead = null; return; }
         const a = new Audio(URL.createObjectURL(b));
@@ -599,8 +601,15 @@
   }
   let cdTimer = null, cdVoiceTimer = null;
   function playCountdownVoice(msLeft) {
+    dbg("countdown", silent() ? `silent: ${silentReason() || "silent"}` : lead?.audio ? "voice queued" : "voice not preloaded: live TTS");
     if (silent()) { console.info("[say]", LEAD_TEXT); return; }
-    if (!lead?.audio) { say(LEAD_TEXT); return; }
+    if (!lead?.audio) {
+      // No Gemini clip (TTS down or still loading): browser voice right away. Waiting for live TTS here
+      // held the voice lock ~8 s and dropped the first rep call-outs. Try the clip again for next set.
+      if (window.LWAudio?.say) LWAudio.say(LEAD_TEXT, { fallbackMs: 300 }); else say(LEAD_TEXT);
+      if (!lead) preloadCountdownVoice();
+      return;
+    }
     const a = lead.audio, music = $("music");
     // End the voice on "curl!" right when the set arms; duck the music while it talks.
     cdVoiceTimer = setTimeout(() => {
@@ -755,6 +764,46 @@
   if (location.hash === "#lifts") setTimeout(openLifts, 0);
   setTimeout(refreshOutputs, 0);
 
+  // ------------------------------------------------------------ audio diagnostics
+  // Every audio decision is posted to /debug/audio (server logs "[audio] ..."), and the header says
+  // "audio: ok" or why this tab is silent, so a silent demo never needs guessing again.
+  let dbgLast = "", dbgLastAt = 0, dbgCount = 0, dbgWindow = 0;
+  function audioState() {
+    const st = window.LWAudio?.state?.() || {};
+    return { ctx: st.ctx ?? "no-player", enabled: st.enabled, pending: st.pending, busy_ms: st.since, sink: st.sink || "", speaker: isSpeaker, quiet: QUIET, muted: MUTED, stale: STALE, unlocked: audioUnlocked };
+  }
+  function dbg(evt, what) {
+    const key = `${evt}|${what || ""}`, now = Date.now();
+    if (key === dbgLast && now - dbgLastAt < 1000) return;
+    if (now - dbgWindow > 1000) { dbgWindow = now; dbgCount = 0; }
+    if (++dbgCount > 4) return; // at most 4 posts per second
+    dbgLast = key; dbgLastAt = now;
+    try {
+      fetch("/debug/audio", { method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true,
+        body: JSON.stringify({ client_id: clientId, evt, what: what || null, state: audioState() }) }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+  window.addEventListener("lwaudio", e => dbg(e.detail?.type || "event", e.detail?.what));
+  function silentReason() {
+    const st = audioState();
+    if (MUTED) return "muted tab (?mute=1)";
+    if (QUIET) return "Quiet mode";
+    if (!isSpeaker) return "not the speaker tab";
+    if (st.ctx === "no-player") return "voice player not loaded";
+    if (!audioUnlocked || st.ctx === "suspended") return "audio locked: click anywhere";
+    if (st.enabled === false) return "player disabled";
+    if (st.pending > 0 && st.busy_ms > 40000) return "voice queue stuck";
+    return "";
+  }
+  let lastReason = null;
+  setInterval(() => {
+    const r = silentReason();
+    const el = $("audioStat");
+    el.textContent = r ? `audio: silent because ${r}` : "audio: ok";
+    el.classList.toggle("warn", !!r);
+    if (r !== lastReason) { lastReason = r; dbg(r ? "silent" : "ok", r || null); }
+  }, 1000);
+
   // ------------------------------------------------------------ quiet mode
   function applyQuiet(on) {
     QUIET = !!on;
@@ -870,7 +919,7 @@
         case "live": live = e.pct; liveAt = performance.now(); break;
         case "status": onStatus(e); break;
         case "hello": clientId = e.client_id; break;
-        case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; syncVoice(); renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
+        case "speaker": if (isSpeaker !== !!e.you) dbg("speaker", e.you ? "this tab" : "other tab"); isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; syncVoice(); renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
         case "quiet": applyQuiet(e.on); break;
         case "workout": loadWorkoutSoon(100); break;
         case "workout_summary": wsum = e.summary; renderSoFar(); break;
