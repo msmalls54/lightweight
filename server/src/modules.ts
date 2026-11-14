@@ -3,6 +3,6 @@ export { Engine, CH } from "./engine/index.js";
 export type { Arm, Variant, Batch, Calibration, SetContext, LiveFrame, RepEvent, CoachDecision, SetEndEvent, EngineEvent } from "./engine/index.js";
 export { pickCue, pickCueSequence, pickSetEndCue, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, summarizeSession, answer, writeTodayHistory } from "./coach/index.js";
 export type { CoachContext, SetMeta, SetDetail, SessionSummary, LoggedLift, WorkoutInput } from "./coach/index.js";
-export { setFacts, upRatioX, labelRep, mentionsRawShare, scrubSnitch } from "./coach/index.js";
+export { setFacts, upRatioX, labelRep, mentionsRawShare, scrubSnitch, sayableMultiple } from "./coach/index.js";
 export { coachVoiceExtras } from "./coach/index.js"; // ④ backup voice: { clips, voice_mode } for coach events
 export { initVoice, registerVoiceRoutes, loadGeminiKey, loadGeminiTtsKey, DEFAULT_VOICE_CACHE, speak, spokenPart } from "./voice/index.js";

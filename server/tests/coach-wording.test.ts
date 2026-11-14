@@ -105,7 +105,7 @@ test("never a raw delt share: not in the prompt, rejected in the output", async 
   });
   assert.equal(await summarizeSet(ctx, SET1), fallbackSummary(SET1));
   assert.doesNotMatch(seen, /delt_share|"delt_peak|up_delt_ratio"|0\.569/);
-  assert.match(seen, /"up_delt_x_clean":8\.6/);
+  assert.match(seen, /"up_delt_x_clean":9\b/);
   for (const bad of ["your delt share hit 51 percent", "shoulder at 46 percent", "front delt fired at 99%", "shoulder share was high"])
     assert.ok(mentionsRawShare(bad), bad);
   for (const ok of ["right biceps did 41 percent of the work", "your shoulder did 8 times its normal share", "biceps peaked at 46 percent"])

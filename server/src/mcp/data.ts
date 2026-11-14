@@ -2,7 +2,7 @@
 import type { Store, SessionRow, SetRow } from "../store.js";
 import type { RepEvent, SetEndEvent, SetContext, Arm } from "../modules.js";
 
-import { setFacts, upRatioX, labelRep, mentionsRawShare, scrubSnitch } from "../modules.js";
+import { setFacts, upRatioX, labelRep, mentionsRawShare, scrubSnitch, sayableMultiple } from "../modules.js";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -10,7 +10,7 @@ const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.le
 const BI: Record<Arm, number> = { R: 0, L: 2 };
 
 /** Said once in every tool result that carries raw numbers. */
-export const RAW_NOTE = "The engine's verdict per arm is the call (clean / loose / cheat); its main signal is shoulder help on the way up as a multiple of this person's clean reps (about 1.35× and up is a cheat, unless it's part of a slow fatigue drift, which is 'a bit loose'). Raw effort (%MVC) is context only: under load the front delt often works at about half the biceps' level even on clean reps, so never call that 'the shoulders did half the work'.";
+export const RAW_NOTE = "The engine's verdict per arm is the call (clean / loose / cheat); its main signal is shoulder help on the way up as a multiple of this person's clean reps (shoulder_help_x is given only when it's 3× or more, as a whole number: say it then, e.g. '8 times normal'; when it's null, describe it in words, e.g. 'the shoulder jumped in' or 'a bit loose', never '1 time' or '2 times'). Raw effort (%MVC) is context only: under load the front delt often works at about half the biceps' level even on clean reps, so never call that 'the shoulders did half the work'.";
 
 export interface RepView {
   set_no: number; rep: number; arm: Arm;
@@ -56,13 +56,14 @@ export function eventVerdict(r: RepEvent): "clean" | "loose" | "cheat" {
   return x != null && x >= 1.2 ? "loose" : "clean";
 }
 
+// ④: shoulder_help_x only when dramatic (>= 3x, whole number); below that Claude describes it in words.
 export function repView(setNo: number, r: RepEvent): RepView {
   const bi = BI[r.arm], de = bi + 1;
   const x = upRatioX(r);
   const verdict = eventVerdict(r);
   const arms = r.arm_detail ? Object.fromEntries(Object.entries(r.arm_detail).filter(([, d]) => d).map(([a, d]) => [a, {
-    verdict: d!.verdict, shoulder_help_x: d!.ref_up_delt_ratio && d!.ref_up_delt_ratio > 0 ? r1(d!.up_delt_ratio / d!.ref_up_delt_ratio) : null }])) : undefined;
-  return { set_no: setNo, rep: r.rep, arm: r.arm, verdict, label: labelRep(r), shoulder_help_x: x == null ? null : r1(x), cheat: r.cheat, loose: verdict === "loose", arms,
+    verdict: d!.verdict, shoulder_help_x: d!.ref_up_delt_ratio && d!.ref_up_delt_ratio > 0 ? sayableMultiple(d!.up_delt_ratio / d!.ref_up_delt_ratio) : null }])) : undefined;
+  return { set_no: setNo, rep: r.rep, arm: r.arm, verdict, label: labelRep(r), shoulder_help_x: sayableMultiple(x), cheat: r.cheat, loose: verdict === "loose", arms,
     reason: r.cheat ? (r.cheat_reason === "delt_peak" ? "shoulder spike" : "shoulder took over on the way up") : null,
     both_arms: bothCurled(r), r_share: bothCurled(r) && r.r_share != null ? r2(r.r_share) : null,
     tempo_up_ms: Math.round(r.up_ms), tempo_down_ms: Math.round(r.down_ms),

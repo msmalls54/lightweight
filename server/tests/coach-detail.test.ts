@@ -66,7 +66,7 @@ test("fallback detail card covers reference, cheats, near-miss, tempo, L/R, cue;
   const all = d.bullets.join("\n");
   assert.match(all, /Reps 1 and 2 set your clean reference/);
   assert.match(all, /Reps 4 and 8: right shoulder did 9 and 7x its normal share/);
-  assert.match(all, /Rep 5: smaller cheat \(2.2x its normal share\); right biceps peaked at 46% of max/);
+  assert.match(all, /Rep 5: smaller cheat, your right shoulder jumped in; right biceps peaked at 46% of max/); // 2.2x: no number
   assert.match(all, /Rep 9: near-miss/);
   assert.match(all, /nothing rushed/);
   assert.match(all, /right biceps did 41%/);
@@ -82,7 +82,7 @@ test("summarizeSet: per-rep table reaches the brain; a line missing a cheat rep 
     return "Reps 4 and 8: your right shoulder fired 8 times harder than your clean reps, that's a swing. Stop at the first cheat and rest longer.";
   });
   assert.equal(await summarizeSet(ctx(), SET1), fallbackSummary(SET1)); // rep 5 missing
-  assert.match(seen, /"up_delt_x_clean":8\.6/);
+  assert.match(seen, /"up_delt_x_clean":9\b/); // whole number for Gemini
   assert.match(seen, /"big_swing_reps":\[4,8\]/);
   assert.match(seen, /"near_miss_reps":\[9\]/);
   assert.match(seen, /"fast_up_reps":\[\]/);
@@ -107,8 +107,8 @@ test("summarizeSetDetail: parses Gemini JSON, rejects rule breaks", async () => 
     headline: "Two big swings and one sneaky cheat",
     bullets: [
       "Reps 4 and 8: right front delt fired 9 and 7 times your clean reps on the way up, a full swing.",
-      "Rep 5: smaller cheat at 2 times clean, with the right biceps only at 46 percent.",
-      "Rep 9 was a near-miss at 1.7 times clean.",
+      "Rep 5: smaller cheat, your shoulder jumped in, with the right biceps only at 46 percent.",
+      "Rep 9 was a near-miss, the shoulder crept up.",
       "Tempo was steady at about half a second up; nothing rushed.",
       "Right biceps did 41 percent of the work: left side carried more.",
     ],
@@ -149,7 +149,7 @@ test("answer() gets the same rich facts for every set today", async () => {
   await answer(ctx([SET1, SET2]), "Which rep did I cheat?");
   assert.match(seen, /"set_no":1/);
   assert.match(seen, /"set_no":2/);
-  assert.match(seen, /"up_delt_x_clean":12\.2/);
+  assert.match(seen, /"up_delt_x_clean":12\b/);
   assert.match(seen, /"right_biceps_share_pct":41/);
   assert.doesNotMatch(seen, /delt_share|"delt_peak/);
   setBrain(undefined);

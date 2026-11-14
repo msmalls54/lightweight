@@ -11,6 +11,8 @@ export const DETAIL_CONFIG = {
   bigSwingX: 4,
   /** A rep whose up phase is under this x the set's median = "faster than your usual". */
   fasterThanUsualX: 0.75,
+  /** Say a shoulder multiple out loud / in text only at or above this (else describe it in words). */
+  sayMultipleX: 3,
   /** Clean rep at or above this multiple = a near-miss worth mentioning. */
   nearMissX: 1.5,
   /** Set-level balance verdict uses the plan target (plan.json: R/L biceps share 0.45–0.55). */
@@ -208,6 +210,9 @@ const RAW_KEYS = new Set([
   "delt_saturated",
 ]);
 
+/** Keys that carry a shoulder multiple (x the lifter's clean reps). */
+const MULTIPLE_KEY = /(^|_)x(_|$)|multiple/;
+
 const CHEAT_REASON_WORDS: Record<string, string> = { delt_share_jump: "shoulder_took_over", delt_peak: "shoulder_spike" };
 
 /** What the LLM sees: setFacts minus raw delt numbers (talk relative to the lifter's clean reps). */
@@ -218,7 +223,17 @@ export function forLlm<T>(v: T): T {
     for (const [k, x] of Object.entries(v)) {
       if (RAW_KEYS.has(k)) continue;
       // The engine's reason names ("delt_share_jump") would prime the model to quote a delt share.
-      out[k] = k === "cheat_reason" && typeof x === "string" ? (CHEAT_REASON_WORDS[x] ?? "shoulder_took_over") : forLlm(x);
+      if (k === "cheat_reason" && typeof x === "string") {
+        out[k] = CHEAT_REASON_WORDS[x] ?? "shoulder_took_over";
+        continue;
+      }
+      // Shoulder multiples: only dramatic ones (>= 3x, whole numbers) reach the model.
+      if (MULTIPLE_KEY.test(k)) {
+        const m = Array.isArray(x) ? x.map((v) => sayableMultiple(v as number)) : sayableMultiple(x as number);
+        if (Array.isArray(m) ? m.every((v) => v != null) : m != null) out[k] = m;
+        continue;
+      }
+      out[k] = forLlm(x);
     }
     return out as T;
   }
@@ -331,12 +346,17 @@ export function listReps(ns: number[]): string {
   return `${ns.slice(0, -1).join(", ")} and ${ns.at(-1)}`;
 }
 
-/** Multiples for a group of reps: "9 times", "9 and 7 times", "8 to 12 times" (unit "x" for the card). */
+/**
+ * A shoulder multiple worth saying: whole number, only when it's dramatic (>= 3x the lifter's clean reps).
+ * null below that: describe it in words instead ("your shoulder jumped in"). Never "1 time", never decimals.
+ */
+export function sayableMultiple(x: number | null | undefined): number | null {
+  return x != null && Number.isFinite(x) && x >= DETAIL_CONFIG.sayMultipleX ? Math.round(x) : null;
+}
+
+/** Multiples for a group of reps: "9 times", "9 and 7 times", "8 to 12 times" (unit "x" for the card). Only >= 3x. */
 function multiples(rs: ReturnType<typeof repFacts>[], unit: "times" | "x"): string {
-  const v = rs
-    .map((r) => r.up_delt_x_clean)
-    .filter((x): x is number => x != null)
-    .map((x) => (x < 2 ? Math.round(x * 10) / 10 : Math.round(x))); // never "1 times"
+  const v = rs.map((r) => sayableMultiple(r.up_delt_x_clean)).filter((x): x is number => x != null);
   if (!v.length) return "";
   const u = unit === "x" ? "x" : " times";
   if (v.length === 1) return `${v[0]}${u}`;
@@ -376,10 +396,14 @@ export function fallbackSummary(set: SetEndEvent): string {
   const other = cheatsF.filter((r) => r.label !== "big_swing");
   if (big.length)
     parts.push(`Rep${big.length > 1 ? "s" : ""} ${listReps(big.map((r) => r.rep))}: ${side(big[0].arm)} shoulder at ${multiples(big, "times")} normal, that's a swing.`);
-  if (other.length && (big.length || other.every((r) => r.up_delt_x_clean == null)))
-    parts.push(`Rep${other.length > 1 ? "s" : ""} ${listReps(other.map((r) => r.rep))} ${big.length ? "smaller" : other.length > 1 ? "were cheats: your shoulder took over" : "was a cheat: your shoulder took over"}.`);
-  else if (other.length)
-    parts.push(`Rep${other.length > 1 ? "s" : ""} ${listReps(other.map((r) => r.rep))}: ${side(other[0].arm)} shoulder at ${multiples(other, "times")} normal.`);
+  if (other.length) {
+    const reps = `Rep${other.length > 1 ? "s" : ""} ${listReps(other.map((r) => r.rep))}`;
+    const m = multiples(other, "times"); // only a dramatic (>= 3x) multiple is said
+    const rushed = other.every((r) => r.fast_up) ? ", rushed up" : "";
+    if (big.length) parts.push(`${reps} smaller.`);
+    else if (m) parts.push(`${reps}: ${side(other[0].arm)} shoulder at ${m} normal${rushed}.`);
+    else parts.push(`${reps}: your ${side(other[0].arm)} shoulder took over${rushed}.`);
+  }
   return `${parts.join(" ")} ${decision}`;
 }
 
@@ -407,12 +431,12 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
     );
   for (const r of mild)
     bullets.push(
-      `Rep ${r.rep}: smaller cheat${r.up_delt_x_clean != null ? ` (${r.up_delt_x_clean}x its normal share)` : ""}; ${side(r.arm)} biceps peaked at ${r.biceps_peak_pct[r.arm]}% of max.`,
+      `Rep ${r.rep}: smaller cheat${sayableMultiple(r.up_delt_x_clean) != null ? ` (${sayableMultiple(r.up_delt_x_clean)}x its normal share)` : `, your ${side(r.arm)} shoulder jumped in`}; ${side(r.arm)} biceps peaked at ${r.biceps_peak_pct[r.arm]}% of max.`,
     );
   const loose = f.reps.filter((r) => r.label === "loose");
   if (loose.length)
     bullets.push(`Rep${loose.length > 1 ? "s" : ""} ${listReps(loose.map((r) => r.rep))}: a bit loose, the shoulder crept up as you tired. Not a cheat.`);
-  for (const r of near) bullets.push(`Rep ${r.rep}: near-miss at ${r.up_delt_x_clean}x normal, still counted clean.`);
+  for (const r of near) bullets.push(`Rep ${r.rep}: near-miss, the shoulder crept up but it still counted clean.`);
   if (f.tempo.median_up_ms != null)
     bullets.push(
       f.tempo.fast_up_reps.length
@@ -532,6 +556,17 @@ export function mentionsLoadChange(text: string): boolean {
     /\b(heavier|lighter)\s+(weight|dumbbells?|band|load)\b/.test(t) ||
     /\b\d+\s*(lb|lbs|pounds)\b/.test(t.replace(/\b35\s*(lb|lbs|pounds)\b/g, ""))
   );
+}
+
+/** A multiple that isn't dramatic or isn't whole ("1 time normal", "2 times", "1.4x"): not to be said. */
+export function mentionsSmallMultiple(text: string): boolean {
+  const t = text.toLowerCase();
+  if (/\b(zero|one|two|half|a couple of)\s+times?\b/.test(t)) return true;
+  for (const m of t.matchAll(/(\d+(?:\.\d+)?)\s*(?:x\b|×|times?\b)/g)) {
+    const n = Number(m[1]);
+    if (!Number.isInteger(n) || n < DETAIL_CONFIG.sayMultipleX) return true;
+  }
+  return false;
 }
 
 /** Words that must never reach the speaker (claim scope: not medical). */

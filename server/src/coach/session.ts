@@ -1,7 +1,7 @@
 // Workout-level coach: "so far today" across all sets, while Mike is mid-workout.
 // Code computes every number and picks the one thing to fix; Gemini only phrases it.
 import type { CoachContext } from "./context.js";
-import { listReps, plural, sameLift, setFacts, type LiftKey } from "./facts.js";
+import { listReps, plural, sameLift, sayableMultiple, setFacts, type LiftKey } from "./facts.js";
 import type { Arm, SetEndEvent } from "./types.js";
 
 /** A set counts toward trends only with at least this many reps (shorter ones are test/warm-up blips). */
@@ -145,7 +145,7 @@ export function workoutFacts(input: Required<WorkoutInput>): WorkoutFacts {
       fatigue_sets: fatigueSets,
       cheat_arm,
       cheat_arm_counts: armCount,
-      worst_multiple: Math.max(0, ...working.map((s) => s.f.worst_rep?.up_delt_x_clean ?? 0)) || null,
+      worst_multiple: sayableMultiple(Math.max(0, ...working.map((s) => s.f.worst_rep?.up_delt_x_clean ?? 0)) || null),
       best_set: best ? { set: best.n, reps: best.f.total_reps, cheats: best.f.cheats } : null,
       fast_up_reps: fastReps,
       fast_up_share: workingReps ? Math.round((fastReps / workingReps) * 100) / 100 : 0,
