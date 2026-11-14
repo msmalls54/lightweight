@@ -1,5 +1,5 @@
 // batch -> store -> engine.ingest -> events -> SSE (+ pickCue). Also sets, calibration and replay.
-import { Engine, pickCueSequence, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, writeTodayHistory, speak,
+import { Engine, pickCueSequence, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, writeTodayHistory, speak, spokenPart,
   type Arm, type Batch, type Calibration, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "./modules.js";
 import type { Store, SessionKind, EventRow } from "./store.js";
 import type { Hub } from "./hub.js";
@@ -202,8 +202,10 @@ export class Pipeline {
       console.log(`[coach] ${sess.person} set ${e.set_id}: ${text}`);
       this.hub.send({ type: "coach", set_id: e.set_id, text, fallback_clip: fallback, audio: "pending" });
       try {
-        await withTimeout(speak(text), 30_000);
-        this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: true, text });
+        // Only the first sentence is spoken (④'s spokenPart); the full line stays on screen.
+        const spoken = spokenPart(text);
+        await withTimeout(speak(spoken), 30_000);
+        this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: true, text, spoken });
       } catch (err) {
         console.error("[voice] summary TTS failed:", errMsg(err));
         this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
