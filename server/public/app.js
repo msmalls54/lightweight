@@ -67,6 +67,7 @@
     const NS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "-4 -4 108 208");
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
     const tracked = new Set(CH_INFO.map(c => `${c.muscle}/${c.side}`));
     for (const s of data.shapes) {
       const p = document.createElementNS(NS, "polygon");
@@ -182,8 +183,31 @@
   // ------------------------------------------------------------ status
   function ago(ms) { return ms == null ? "never" : ms < 1500 ? "now" : `${Math.round(ms / 1000)} s ago`; }
   let lastStatus = null;
+  // A page load must not show an old run as if it were live. If the open session is fake, a finished
+  // replay, or >10 min old with no device streaming, show a clean idle state until something new
+  // happens (new session, a rep, calibration, a replay). Fake/replay runs stay in the Replay list.
+  let staleId = null, firstStatus = true;
+  function sessionAgeMs(id) { // ids are s-MMDD-HHMMSS-xxx / replay-MMDD-HHMMSS-xxx (server local time)
+    const m = /^(?:s|replay)-(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id || "");
+    if (!m) return 0;
+    const now = new Date();
+    return now - new Date(now.getFullYear(), +m[1] - 1, +m[2], +m[3], +m[4], +m[5]);
+  }
+  function clearStale() { if (staleId) { staleId = null; renderSetLine(); } }
+  function renderIdle() {
+    $("who").innerHTML = `No session <small>press New session</small>`;
+    $("setline").innerHTML = `Ready <span class="idle-note">· press New session (Mike) or Walk-up</span>`;
+    $("setmeta").textContent = "Then Calibrate (C) and curl.";
+    $("coach").textContent = "";
+  }
   function onStatus(s) {
     lastStatus = s;
+    if (firstStatus) {
+      firstStatus = false;
+      const ss0 = s.session;
+      if (ss0 && s.mode === "live" && (ss0.kind !== "live" || (sessionAgeMs(ss0.id) > 10 * 60_000 && !s.device.streaming))) staleId = ss0.id;
+    }
+    if (staleId && (s.mode !== "live" || s.session?.id !== staleId)) clearStale();
     const d = s.device;
     $("devDot").className = `dot ${d.streaming ? "on" : d.last_batch_age_ms == null ? "" : "off"}`;
     $("devText").textContent = d.streaming ? `Device streaming · ${d.batches_per_s.toFixed(1)} batches/s` : d.last_batch_age_ms == null ? "No device yet" : `Device silent · last ${ago(d.last_batch_age_ms)}`;
@@ -193,6 +217,12 @@
     m.textContent = s.mode === "replay" ? `REPLAY ${s.replay ? `${Math.round((s.replay.i / s.replay.n) * 100)}%` : ""}` : "LIVE";
     m.classList.toggle("replay", s.mode === "replay");
     const ss = s.session;
+    if (staleId) {
+      renderIdle();
+      $("btnReplayStop").disabled = s.mode !== "replay";
+      $("btnReplay").disabled = s.mode === "replay";
+      return;
+    }
     if (ss) {
       activeArms = s.set?.arms ?? ss.arms;
       $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrated ? (ss.cal_problems.length ? "calibrated ⚠" : "calibrated ✓") : ss.calibrating ? "calibrating…" : "not calibrated (raw)"}</small>`;
@@ -217,22 +247,24 @@
         case "status": onStatus(e); break;
         case "history":
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet();
+          if (staleId) { renderIdle(); break; } // old fake/replay/stale run: don't show its reps
           for (const r of e.reps) onRep(r, false);
           break;
-        case "rep": onRep(e, true); break;
-        case "set_end": onSetEnd(e); break;
+        case "rep": clearStale(); onRep(e, true); break;
+        case "set_end": clearStale(); onSetEnd(e); break;
         case "coach":
           if (e.text) { $("coach").textContent = e.text; say(e.text); }
           else { $("coach").textContent = ""; playClip(e.fallback_clip); }
           break;
-        case "calibration": onCalEvent(e); break;
+        case "calibration": clearStale(); onCalEvent(e); break;
         case "calibrate_request": calibrate(); break;
         case "session":
+          clearStale();
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); $("coach").textContent = "";
           toast(`New session: ${e.person}${e.walkup ? " (walk-up)" : ""}`);
           break;
         case "replay":
-          if (e.phase === "start") { $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); toast("Replay started"); }
+          if (e.phase === "start") { clearStale(); $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); toast("Replay started"); }
           else { toast(`Replay ${e.phase}`); loadSessions(); }
           break;
       }
