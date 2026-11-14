@@ -49,10 +49,29 @@ export class Store {
         rep INTEGER NOT NULL, cheat INTEGER NOT NULL, delt_share REAL NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL,
         UNIQUE(set_id, arm, rep)
       );
+      CREATE TABLE IF NOT EXISTS logged_lifts (
+        id INTEGER PRIMARY KEY, person TEXT NOT NULL, exercise TEXT NOT NULL, variant TEXT NOT NULL, load_lb REAL,
+        sets INTEGER, reps INTEGER, note TEXT, logged_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS heartbeats (
         heartbeat_id INTEGER PRIMARY KEY, received_at TEXT NOT NULL, device TEXT NOT NULL, payload TEXT NOT NULL
       );
     `);
+    // Added later: the coach's "Set N report" card per set.
+    const cols = (this.db.prepare("PRAGMA table_info(sets)").all() as { name: string }[]).map(c => c.name);
+    if (!cols.includes("detail")) this.db.exec("ALTER TABLE sets ADD COLUMN detail TEXT");
+  }
+
+  saveSetDetail(setId: string, detail: unknown) { this.db.prepare("UPDATE sets SET detail=? WHERE set_id=?").run(JSON.stringify(detail), setId); }
+  /** A lift done without sensors (MCP log_exercise with reps): shows as "logged · not sensed". */
+  logLift(l: { person: string; exercise: string; variant: string; load_lb?: number; sets?: number; reps?: number; note?: string }) {
+    const r = this.db.prepare("INSERT INTO logged_lifts(person,exercise,variant,load_lb,sets,reps,note,logged_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run(l.person, l.exercise, l.variant, l.load_lb ?? null, l.sets ?? null, l.reps ?? null, l.note ?? null, new Date().toISOString());
+    return Number(r.lastInsertRowid);
+  }
+  loggedToday(person: string, since: string) {
+    return this.db.prepare("SELECT * FROM logged_lifts WHERE person=? AND logged_at>=? ORDER BY logged_at").all(person, since) as
+      { id: number; person: string; exercise: string; variant: string; load_lb: number | null; sets: number | null; reps: number | null; note: string | null; logged_at: string }[];
   }
 
   createSession(s: { session_id: string; person: string; is_walkup: boolean; kind: SessionKind; arms: Arm[]; source_session_id?: string }) {

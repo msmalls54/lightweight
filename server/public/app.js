@@ -62,7 +62,7 @@
   const bars = CH_INFO.map((c, i) => {
     const el = document.createElement("div");
     el.className = `raw ${c.kind}`;
-    el.innerHTML = `<span class="lbl">${c.arm} ${c.kind === "bi" ? "biceps" : "front delt"}</span><div class="track"><div class="fill"></div><div class="mvc" style="left:${(100 / BAR_MAX).toFixed(1)}%"></div></div><span class="val">0%</span>`;
+    el.innerHTML = `<span class="lbl" title="${c.arm} ${c.kind === "bi" ? "biceps" : "front delt"}">${c.arm[0]} ${c.kind === "bi" ? "biceps" : "delt"}</span><div class="track"><div class="fill"></div><div class="mvc" style="left:${(100 / BAR_MAX).toFixed(1)}%"></div></div><span class="val">0%</span>`;
     $("bars").appendChild(el);
     return { el, val: el.querySelector(".val"), fill: el.querySelector(".fill"), i };
   });
@@ -140,6 +140,7 @@
     const feed = $("feed");
     feed.prepend(li);
     while (feed.children.length > 40) feed.lastChild.remove();
+    $("feedCount").textContent = String(feed.querySelectorAll("li:not(.setend)").length);
     setTimeout(() => li.classList.remove("fresh"), 600);
   }
   // ------------------------------------------------------------ cheat meter (per arm)
@@ -162,39 +163,40 @@
   for (const arm of ["R", "L"]) {
     const el = document.createElement("div");
     el.className = "meter";
-    el.innerHTML = `<div class="m-top"><span class="side">${arm === "R" ? "Right arm" : "Left arm"}</span><span>Shoulder help vs your clean rep</span></div>
+    el.dataset.arm = arm; // person's right arm sits left of the figure
+    el.innerHTML = `<div class="side">${arm === "R" ? "Right arm" : "Left arm"}</div>
       <div class="verdict">–</div>
-      <div class="gauge"><div class="z zg"></div><div class="z za"></div><div class="z zr"></div><div class="mk" style="display:none"></div><div class="mv"></div><div class="learn"></div></div>
-      <div class="m-foot"><span class="msub">Learning your clean rep (2 reps)</span><span class="scale"><span>0×</span><span>1.2×</span><span>2×</span></span></div>`;
+      <div class="vgauge" title="Shoulder help on the way up vs your clean rep (0–2×)"><div class="z zg"></div><div class="z za"></div><div class="z zr"></div><div class="mk" style="display:none"></div></div>
+      <div class="msub">Learning your clean rep</div>`;
     $("meters").appendChild(el);
     meters[arm] = el;
   }
+  const lastLive = { R: null, L: null }; // last live rep per arm, restored after reviewing an old set
   function resetMeters() {
+    lastLive.R = lastLive.L = null;
     for (const arm of ["R", "L"]) {
       const el = meters[arm];
       el.classList.remove("cheat", "loose", "clean");
       el.querySelector(".mk").style.display = "none";
-      el.querySelector(".mv").textContent = "";
       el.querySelector(".verdict").textContent = "–";
-      el.querySelector(".msub").textContent = "Learning your clean rep (2 reps)";
+      el.querySelector(".msub").textContent = "Learning your clean rep";
     }
   }
-  function updateMeter(r) {
-    const el = meters[r.arm];
+  /** verdict: "CLEAN" | "LOOSE" | "CHEAT"; m: shoulder-help multiple or null (no reference yet). */
+  function showMeter(arm, v, m, repNo, sub) {
+    const el = meters[arm];
     if (!el) return;
-    const m = repMultiple(r), v = verdictOf(r);
     el.classList.remove("cheat", "loose", "clean");
-    el.classList.add(v === "CHEAT" ? "cheat" : v === "LOOSE" ? "loose" : "clean");
-    const mk = el.querySelector(".mk"), msub = el.querySelector(".msub");
-    if (m == null) {
-      mk.style.display = "none";
-      msub.textContent = r.cheat ? `Rep ${r.rep} · no clean reference yet, obvious swing` : `Rep ${r.rep} · learning your clean rep (${Math.min(r.rep, 2)} of 2)`;
-    } else {
-      const x = Math.min(m, METER_MAX) / METER_MAX * 100;
-      mk.style.display = ""; mk.style.left = `${Math.max(1, Math.min(99, x))}%`;
-      msub.textContent = `Rep ${r.rep}`;
-    }
+    el.classList.add(v.toLowerCase());
+    const mk = el.querySelector(".mk");
+    if (m == null) mk.style.display = "none";
+    else { mk.style.display = ""; mk.style.bottom = `${Math.max(1, Math.min(99, (Math.min(m, METER_MAX) / METER_MAX) * 100))}%`; }
     el.querySelector(".verdict").innerHTML = `${VERDICT_LABEL[v]}${m != null ? `<span class="mx">${fmtX(m)}</span>` : ""}`;
+    el.querySelector(".msub").textContent = sub ?? `Rep ${repNo}`;
+  }
+  function updateMeter(r) {
+    const m = repMultiple(r), v = verdictOf(r);
+    showMeter(r.arm, v, m, r.rep, m == null ? (r.cheat ? `Rep ${r.rep} · obvious swing` : `Rep ${r.rep} · learning (${Math.min(r.rep, 2)} of 2)`) : null);
   }
   function pulseMap(r) {
     const side = r.arm === "L" ? "left" : "right";
@@ -208,16 +210,137 @@
     }
   }
 
-  // "Set N report" card from the coach's detailed summary (headline, bullets, cue, engine decision).
-  function renderReport(e) {
-    const d = e.detail;
-    if (!d) return;
+  // "Set N report": the coach's detailed summary (headline, bullets, cue, engine decision).
+  const details = {}; // set_id -> detail (live events + stored ones from /workout/today)
+  function reportHtml(d) {
+    if (!d) return "";
     const dec = d.decision ? `${esc(d.decision.next.replace(/_/g, " "))}${d.decision.reason ? `: ${esc(d.decision.reason)}` : ""}` : "";
-    $("report").innerHTML = `<div class="r-head"><span>Set ${e.set_no ?? ""} report · ${esc(d.headline || "")}</span><span class="src">${esc(d.source || "")}</span></div>
+    return `<div class="r-head">${esc(d.headline || "")}</div>
       <ul>${(d.bullets || []).map(b => `<li>${esc(b)}</li>`).join("")}</ul>
       ${d.cue ? `<div class="r-cue"><b>Cue</b>${esc(d.cue)}</div>` : ""}
       ${dec ? `<div class="r-dec"><b>Decision</b>${dec}</div>` : ""}`;
   }
+  function showReport(title, src, coachLine, detail) {
+    $("reportName").textContent = title;
+    $("reportSrc").textContent = src || "";
+    $("coach").textContent = coachLine || "";
+    $("report").innerHTML = reportHtml(detail);
+  }
+  // Set numbers in titles follow today's timeline (per exercise across sessions), not the session's own count.
+  function dayNo(setId, fallback) {
+    for (const b of workout?.blocks || []) for (const it of b.items) if (it.kind === "sensed" && it.set_id === setId) return it.set_no;
+    return fallback ?? "";
+  }
+  function renderReport(e) { // live set_detail event
+    if (!e.detail) return;
+    details[e.set_id] = e.detail;
+    if (!selectedSet || selectedSet === e.set_id) showReport(`Set ${dayNo(e.set_id, e.set_no)} report`, e.detail.source, $("coach").textContent, e.detail);
+    loadWorkoutSoon();
+  }
+
+  // ------------------------------------------------------------ today's workout (left) + set review on the body
+  let workout = null, selectedSet = null, reviewSet = null, wTimer = null;
+  function loadWorkoutSoon(ms = 700) { clearTimeout(wTimer); wTimer = setTimeout(loadWorkout, ms); }
+  async function loadWorkout() {
+    try { workout = await (await fetch("/workout/today")).json(); } catch { return; }
+    renderTimeline();
+    renderSoFar();
+  }
+  const setLabel = it => it.reps === 0 ? "no reps" : it.cheats ? `<b>${it.reps}</b> rep${it.reps === 1 ? "" : "s"} · <b>${it.cheats}</b> cheat${it.cheats === 1 ? "" : "s"}` : `<b>${it.reps}</b> clean`;
+  function renderTimeline() {
+    const box = $("timeline");
+    box.innerHTML = "";
+    for (const b of workout?.blocks || []) {
+      const blk = document.createElement("div");
+      blk.className = "blk";
+      blk.innerHTML = `<div class="bh">${esc(b.exercise[0].toUpperCase() + b.exercise.slice(1))} <span>· ${esc(b.variant)}${b.load_lb != null ? ` · ${b.load_lb} lb` : ""}</span></div>`;
+      for (const it of b.items) {
+        if (it.kind === "logged") {
+          const row = document.createElement("div");
+          row.className = "srow logged";
+          row.innerHTML = `<span class="sn">Logged</span><span class="sv">${it.sets ? `${it.sets} × ` : ""}${it.reps ?? "?"} reps · not sensed</span>`;
+          blk.appendChild(row);
+          continue;
+        }
+        if (it.reps === 0 && !it.live) continue;
+        const row = document.createElement("button");
+        row.className = `srow${it.live ? " live" : ""}${selectedSet === it.set_id ? " sel" : ""}`;
+        const byRep = new Map();
+        for (const r of it.rep_list) { const p = byRep.get(r.rep); if (!p || r.verdict === "cheat" || (r.verdict === "loose" && p !== "cheat")) byRep.set(r.rep, r.verdict); }
+        row.innerHTML = `<span class="sn">Set ${it.set_no}</span><span class="sv">${it.live ? '<span class="tagline">Live</span> ' : ""}${setLabel(it)}</span>
+          <span class="dots">${[...byRep.keys()].sort((x, y) => x - y).map(k => `<i class="${byRep.get(k)}"></i>`).join("")}</span>`;
+        row.onclick = () => selectSet(it, b);
+        blk.appendChild(row);
+      }
+      if (blk.children.length > 1) box.appendChild(blk);
+    }
+  }
+  function latestFinished() {
+    for (const b of workout?.blocks || []) for (const it of b.items) if (it.kind === "sensed" && !it.live && it.reps > 0) return { it, b };
+    return null;
+  }
+  function renderSoFar() {
+    const t = workout?.totals;
+    if (!t || !t.sets) { $("sofar").innerHTML = ""; return; }
+    const last = latestFinished();
+    $("sofar").innerHTML = `<div class="tot">${t.sets} set${t.sets === 1 ? "" : "s"} · ${t.reps} reps · ${t.cheats} cheat${t.cheats === 1 ? "" : "s"} today</div>${last?.it.coach_line ? esc(last.it.coach_line) : ""}`;
+    if (!selectedSet && last && !$("report").innerHTML && !$("coach").textContent) {
+      const d = details[last.it.set_id] || last.it.detail;
+      showReport(`Set ${last.it.set_no} report`, d?.source, last.it.coach_line, d);
+    }
+  }
+  function selectSet(it, b) {
+    selectedSet = it.set_id;
+    const d = details[it.set_id] || it.detail;
+    showReport(`Set ${it.set_no} report · ${b.exercise}`, d?.source, it.coach_line, d);
+    if (!d && !it.coach_line) $("report").innerHTML = `<div class="r-dec">${setLabel(it).replace(/<\/?b>/g, "")}${it.decision ? ` · ${esc(it.decision.next.replace(/_/g, " "))}` : ""}</div>`;
+    renderTimeline();
+    // Replay the set's per-rep verdicts on the body, statically, with a scrubber.
+    reviewSet = it;
+    const reps = it.rep_list;
+    if (reps.length && !it.live) $("setline").innerHTML = `Set ${it.set_no}<span class="counts">${setLabel(it)}</span>`;
+    if (!reps.length || it.live) { exitReview(false); return; }
+    $("reviewBar").classList.remove("hidden");
+    $("reviewScrub").max = String(reps.length - 1);
+    $("reviewScrub").value = String(reps.length - 1);
+    // Start from each arm's last rep in the set.
+    for (const arm of ["R", "L"]) {
+      const last = [...reps].reverse().find(r => r.arm === arm);
+      if (last) showMeter(arm, last.verdict.toUpperCase(), last.multiple, last.rep);
+      else { meters[arm].classList.remove("cheat", "loose", "clean"); meters[arm].querySelector(".verdict").textContent = "–"; meters[arm].querySelector(".mk").style.display = "none"; meters[arm].querySelector(".msub").textContent = "Not used"; }
+    }
+    scrubTo(reps.length - 1, false);
+  }
+  function scrubTo(i, pulse = true) {
+    const r = reviewSet?.rep_list[i];
+    if (!r) return;
+    $("reviewText").innerHTML = `Reviewing set ${reviewSet.set_no} · <b>rep ${r.rep}</b> ${r.arm === "L" ? "left" : "right"}`;
+    showMeter(r.arm, r.verdict.toUpperCase(), r.multiple, r.rep);
+    if (pulse) pulseMap({ arm: r.arm, cheat: r.verdict === "cheat" });
+  }
+  $("reviewScrub").oninput = e => scrubTo(Number(e.target.value));
+  function exitReview(restore = true) {
+    const was = !!reviewSet;
+    reviewSet = null;
+    if (was) renderSetLine();
+    $("reviewBar").classList.add("hidden");
+    if (restore) {
+      resetMetersView();
+      for (const arm of ["R", "L"]) if (lastLive[arm]) updateMeter(lastLive[arm]);
+    }
+  }
+  function resetMetersView() {
+    for (const arm of ["R", "L"]) {
+      const el = meters[arm];
+      el.classList.remove("cheat", "loose", "clean");
+      el.querySelector(".mk").style.display = "none";
+      el.querySelector(".verdict").textContent = "–";
+      el.querySelector(".msub").textContent = "Learning your clean rep";
+    }
+  }
+  $("reviewBack").onclick = () => { selectedSet = null; exitReview(); renderTimeline(); const l = latestFinished(); if (l) { const d = details[l.it.set_id] || l.it.detail; showReport(`Set ${l.it.set_no} report`, d?.source, l.it.coach_line, d); } };
+  loadWorkout();
+  setInterval(loadWorkout, 15000);
 
   function repHtml(r) {
     const armName = r.arm === "L" ? "Left" : "Right";
@@ -243,7 +366,10 @@
     setState.reps.set(r.rep, !!(setState.reps.get(r.rep) || r.cheat));
     renderSetLine();
     addFeed(repHtml(r), "");
-    updateMeter(r);
+    if (fresh || !lastLive[r.arm] || r.rep >= lastLive[r.arm].rep) lastLive[r.arm] = r;
+    if (fresh && reviewSet) { selectedSet = null; exitReview(false); }
+    if (!reviewSet) updateMeter(r);
+    if (fresh) loadWorkoutSoon();
     if (!fresh) return;
     pulseMap(r);
     const key = `${r.set_id}:${r.rep}`, prev = cuePlayed.get(key);
@@ -269,8 +395,9 @@
     const total = e.clean + e.cheats;
     addFeed(`<span class="v none"></span><span class="t">Set ${e.set_no ?? ""} done · ${total} reps · ${e.clean} clean, ${e.cheats} cheat</span><span class="x"></span><span class="w none">${e.first_cheat_rep ? `First cheat rep ${e.first_cheat_rep}` : ""}</span>`, "setend");
     currentSetId = null;
-    $("coach").textContent = "Coach is thinking…";
-    $("report").innerHTML = "";
+    selectedSet = null;
+    showReport(`Set ${dayNo(e.set_id, e.set_no)} report`, "", "Coach is thinking…", null);
+    loadWorkoutSoon(300);
   }
 
   // ------------------------------------------------------------ status
@@ -569,6 +696,7 @@
         case "hello": clientId = e.client_id; break;
         case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
         case "quiet": applyQuiet(e.on); break;
+        case "workout": loadWorkoutSoon(100); break;
         case "history":
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet();
           if (staleId) { renderIdle(); break; } // old fake/replay/stale run: don't show its reps
@@ -579,7 +707,8 @@
         case "countdown": onCountdown(e); break;
         case "coach":
           if (e.too_short) break;
-          $("coach").textContent = e.text || "";
+          if (!selectedSet) $("coach").textContent = e.text || "";
+          loadWorkoutSoon();
           if (e.audio !== "pending") { // older servers: speak now
             if (e.text) say(e.text); else playClip(e.fallback_clip);
             loopAfterCoach(e.set_id);
@@ -594,12 +723,13 @@
         case "calibrate_request": calibrate(); break;
         case "session":
           clearStale();
-          $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); $("coach").textContent = ""; $("report").innerHTML = ""; resetMeters();
+          $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); showReport("Set report", "", "", null); resetMeters(); selectedSet = null; exitReview(false); loadWorkoutSoon(200);
           toast(`New session: ${e.person}${e.walkup ? " (walk-up)" : ""}`);
           break;
         case "replay":
           if (e.phase === "start") { clearStale(); resetMeters(); $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); toast("Replay started"); }
           else { toast(`Replay ${e.phase}`); loadSessions(); }
+          loadWorkoutSoon(300);
           break;
       }
     };
