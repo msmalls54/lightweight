@@ -16,7 +16,9 @@ export const TTS_FALLBACK_MODELS = ["gemini-3.8-flash-tts"];
  * (2.5–4.3 s, 6/6 ok) while flash-lite-tts timed out at 20 s 6/6, so summaries try flash first.
  * Clips keep TTS_MODEL (they're cached anyway).
  */
-export const SAY_TTS_MODELS = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"];
+// Nov 14 ~3 pm: both 3.8 TTS models hit the free tier's 100 requests/day (104/100), which showed up as
+// timeouts. gemini-3.1-flash-tts-preview has its own daily quota (3/100 used), so it goes first.
+export const SAY_TTS_MODELS = ["gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview", "gemini-3.8-flash-lite-tts"];
 /** Per-model timeout for live TTS: fail over fast (the browser voice takes over at 5 s anyway). */
 export const SAY_TTS_TIMEOUT_MS = 8000;
 /** Spoken part of a summary: Gemini TTS reads only the first sentence, at most this many words. */

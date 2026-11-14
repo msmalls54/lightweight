@@ -7,7 +7,17 @@ import { fileURLToPath } from "node:url";
  * (so it also works from a git worktree under `.claude/worktrees/`). Never log the value.
  */
 export function loadGeminiKey(): string | undefined {
-  if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
+  return loadEnvKey("GEMINI_API_KEY");
+}
+
+/** ELEVENLABS_API_KEY (repo-root .env). Never log the value. */
+export function loadElevenKey(): string | undefined {
+  return loadEnvKey("ELEVENLABS_API_KEY");
+}
+
+/** Any key from the environment or the nearest .env walking up (same search as loadGeminiKey). */
+export function loadEnvKey(name: string): string | undefined {
+  if (process.env[name]) return process.env[name];
   const starts = [process.cwd(), path.dirname(fileURLToPath(import.meta.url))];
   for (const start of starts) {
     let dir = path.resolve(start);
@@ -19,7 +29,7 @@ export function loadGeminiKey(): string | undefined {
         } catch {
           /* unreadable .env: keep looking */
         }
-        if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
+        if (process.env[name]) return process.env[name];
       }
       const up = path.dirname(dir);
       if (up === dir) break;
@@ -27,4 +37,13 @@ export function loadGeminiKey(): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Key for Gemini TTS only: GEMINI_TTS_API_KEY if set (a higher-quota key), else GEMINI_API_KEY.
+ * The coach brain keeps using GEMINI_API_KEY. Never log the value.
+ */
+export function loadGeminiTtsKey(): string | undefined {
+  const base = loadGeminiKey(); // also loads the .env
+  return process.env.GEMINI_TTS_API_KEY || base;
 }
