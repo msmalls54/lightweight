@@ -15,7 +15,11 @@
 //   LWAudio.coachAudio(setId, msg)   the server's coach_audio event ({ok, text, fallback_clip}): plays the
 //                                    Gemini audio, unless the browser already spoke this set's line.
 //   LWAudio.cooldownMs = 3000        min gap between call-out starts
-//   LWAudio.fallbackMs = 7000        Gemini audio deadline before the browser voice takes over
+//   Coach line order: set-end clips -> WAIT for the Gemini first sentence (event "voice_wait": show
+//   "coach is thinking...") -> only if Gemini FAILS (server coach_audio ok:false after its TTS chain, or no
+//   coach_audio at all in coachSafetyMs = 45 s): the stitched Alnilam clips (opts.clips) -> browser
+//   speechSynthesis only if no clip is cached. opts.mode "clips" (LW_SUMMARY_VOICE=clips) = clips at once.
+//   Each set's tier is reported to POST /voice/log for the server log.
 // ONE speech queue: clips, Gemini audio and browser speech never overlap (one lock, speechSynthesis
 // cancelled before each voice); a set's line is owned by Gemini OR the browser, never both; the same
 // line asked for twice within 15 s is spoken once.
@@ -334,7 +338,7 @@
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: text }),
-    }, 15000)
+    }, 24000) // under say()'s 25 s cap; above the server TTS chain (~16 s) so its backup voice gets through
       .then(function (r) {
         if (!r.ok) throw new Error("say " + r.status);
         return r.arrayBuffer();
@@ -342,11 +346,61 @@
       .then(decode);
   }
 
+  // Backup voice for a coach line: the stitched Alnilam clips (whatever is cached), else the browser.
+  // Tell the server which voice spoke for a set (it logs "[voice] set X: gemini 3.4 s" / "... -> clips").
+  function report(setId, tier, ms, reason) {
+    try {
+      fetch("/voice/log", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ set_id: setId, tier: tier, ms: ms, reason: reason || null }),
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function backupJob(c, what, reason) {
+    var setId = String(what).replace(/^coach:/, "");
+    return function () {
+      return Promise.all(
+        (c.clips || []).map(function (k) {
+          return loadClip(k).catch(function () {
+            emit("missing", k);
+            return null;
+          });
+        }),
+      ).then(function (bufs) {
+        // Only a real sentence counts: rep numbers / "and" alone ("Rep four. Rep eight.") say nothing.
+        var meaningful = (c.clips || []).some(function (k, i) {
+          return bufs[i] && !/^rep_\d+$|^word_and$/.test(k);
+        });
+        bufs = meaningful ? bufs.filter(Boolean) : [];
+        if (bufs.length) {
+          emit("clips", what);
+          report(setId, "clips", Date.now() - c.t0, reason);
+          return voice(bufs, "clips:" + what).then(function () {
+            return true;
+          });
+        }
+        if (!c.text) {
+          report(setId, "none", Date.now() - c.t0, reason);
+          return false;
+        }
+        report(setId, "browser", Date.now() - c.t0, reason);
+        return browserSpeak(spokenPart(c.text), "browser:" + what);
+      });
+    };
+  }
+  function browserJob(c, what) {
+    return function () {
+      return c.text ? browserSpeak(spokenPart(c.text), "browser:" + what) : Promise.resolve(false);
+    };
+  }
+
   /**
    * One spoken line: Gemini audio if it's decoded before `deadline` (ms since epoch), else the browser
    * voice. Exactly one of the two, decided once. `owner` (optional) is the per-set ownership record.
    */
-  function speakLine(text, audioP, deadline, owner, what) {
+  function speakLine(text, audioP, deadline, owner, what, fallback) {
     var winner = Promise.race([
       audioP.catch(function () {
         return null;
@@ -370,18 +424,21 @@
       audioP.then(function () {
         emit("skip_late", what);
       }, function () {});
-      return browserSpeak(text, "browser:" + what);
+      return fallback ? fallback() : browserSpeak(text, "browser:" + what);
     });
   }
 
   var LWAudio = {
     cooldownMs: 3000,
-    jobCapMs: 35000,
+    // Hard cap per queue job: above say()'s 25 s TTS wait + playback, so only a truly stuck job trips it.
+    jobCapMs: 40000,
     /** Diagnostics for the dashboard (③): what could keep this tab silent. */
     state: function () {
       return { ctx: ctx ? ctx.state : "none", enabled: enabled, busy: busy, pending: pending, sink: sinkId, since: busy ? Date.now() - lastStart : 0 };
     },
-    fallbackMs: 7000,
+    fallbackMs: 25000, // say(): safety cap on /voice/say (the server's TTS chain gives up after ~16 s)
+    coachSafetyMs: 45000, // coach line: backup only if no coach_audio arrives at all by then
+    cachedAudioMs: 8000, // coach_audio said "cached": cap on fetching it
     ready: null, // Promise: all clips preloaded
 
     /** Route every voice (clips, coach audio, say) to an output device; "" = system default. Returns a Promise. */
@@ -474,6 +531,7 @@
         return Promise.resolve(false);
       }
       // The clock starts now; the fetch starts now too (it's usually a server cache hit).
+      // Gemini is waited for (the server's TTS chain fails on its own); this is only a safety cap.
       var deadline = Date.now() + ((opts && opts.fallbackMs) || LWAudio.fallbackMs);
       var audioP = fetchSay(text);
       audioP.catch(function () {});
@@ -482,52 +540,72 @@
       }, "say");
     },
 
-    coachText: function (setId, text) {
+    /**
+     * The server's coach text arrived. Gemini TTS is the primary voice and is WAITED for (the server's
+     * own TTS chain decides failure: an API error or flash-tts then flash-lite-tts, 8 s each). Only when
+     * it fails (coach_audio ok:false, or no coach_audio at all within coachSafetyMs) does the backup speak:
+     * the stitched Alnilam clips (opts.clips), else the browser voice. opts.mode "clips" (server env
+     * LW_SUMMARY_VOICE=clips) plays the clips right away. Always exactly one voice.
+     */
+    coachText: function (setId, text, opts) {
       text = String(text || "").trim();
-      if (!setId || !text) return;
+      opts = opts || {};
+      var clips = Array.isArray(opts.clips) ? opts.clips.filter(Boolean) : [];
+      if (!setId || (!text && !clips.length)) return;
       var c = coach[setId];
-      if (c) return; // already handled (duplicate event): never a second clock for the same set
-      c = coach[setId] = { text: text, by: null, timer: null, t0: Date.now() };
-      // If the Gemini audio hasn't arrived fallbackMs (7 s) after the text, the browser owns the line.
+      if (c) return; // already handled (duplicate event)
+      var mode = opts.mode === "clips" ? "clips" : "gemini";
+      c = coach[setId] = { text: text, clips: clips, mode: mode, by: null, timer: null, t0: Date.now() };
+      if (!text || mode === "clips") {
+        c.by = "backup";
+        enqueue(backupJob(c, "coach:" + setId, mode === "clips" ? "forced by LW_SUMMARY_VOICE=clips" : "no coach text"), "coach:" + setId);
+        return;
+      }
+      emit("voice_wait", "coach:" + setId); // dashboard: "coach is thinking…"
+      // Safety net only (server crashed / event lost): the server itself gives up after its TTS chain.
       c.timer = setTimeout(function () {
         if (c.by) return;
-        c.by = "browser";
+        c.by = "backup";
         emit("fallback", "coach:" + setId);
-        var spoken = spokenPart(text);
-        isRepeat(spoken);
-        enqueue(function () {
-          return browserSpeak(spoken, "browser:coach");
-        }, "coach:" + setId);
-      }, LWAudio.fallbackMs);
+        enqueue(backupJob(c, "coach:" + setId, "no coach audio"), "coach:" + setId);
+      }, LWAudio.coachSafetyMs);
     },
 
     coachAudio: function (setId, msg) {
       msg = msg || {};
       var c = coach[setId];
       if (c && c.by) {
-        // The browser already took this line (or the audio came twice): drop it.
-        emit("skip_late", "coach:" + setId);
+        emit("skip_late", "coach:" + setId); // backup already spoke (or a duplicate event)
         return Promise.resolve(false);
       }
       if (c) clearTimeout(c.timer);
       var text = (msg.spoken || (msg.text ? spokenPart(msg.text) : "") || (c ? spokenPart(c.text) : "")).trim();
-      if (!c) c = coach[setId] = { text: msg.text || text, by: null, timer: null, t0: Date.now() };
+      if (!c) c = coach[setId] = { text: msg.text || text, clips: [], mode: "gemini", by: null, timer: null, t0: Date.now() };
+      var what = "coach:" + setId;
+      if (!msg.ok || !text) {
+        // Gemini failed on the server: the backup speaks.
+        c.by = "backup";
+        emit("fallback", what);
+        if (!text && !c.clips.length) return msg.fallback_clip ? LWAudio.playClip(msg.fallback_clip) : Promise.resolve(false);
+        return enqueue(backupJob(c, what, "gemini failed (" + (msg.error || "error") + ")"), what);
+      }
       c.by = "gemini";
-      if (!text) return msg.fallback_clip ? LWAudio.playClip(msg.fallback_clip) : Promise.resolve(false);
       if (isRepeat(text)) {
         emit("drop", "coach:repeat");
         return Promise.resolve(false);
       }
-      if (!msg.ok) return enqueue(function () {
-        return browserSpeak(text, "browser:coach");
-      }, "coach:" + setId);
-      // Server says the audio is cached: fetch it now; it still has to beat a short deadline.
-      var deadline = Date.now() + 3000;
+      // The server has the audio cached: this fetch is a cache hit. Safety cap only.
       var audioP = fetchSay(text);
       audioP.catch(function () {});
+      var waited = Date.now() - c.t0;
       return enqueue(function () {
-        return speakLine(text, audioP, deadline, null, "coach:" + setId);
-      }, "coach:" + setId);
+        return speakLine(text, audioP, Date.now() + LWAudio.cachedAudioMs, null, what, backupJob(c, what, "gemini audio fetch failed")).then(function (ok) {
+          return ok;
+        });
+      }, what).then(function (ok) {
+        if (ok && c.by === "gemini") report(setId, "gemini", waited);
+        return ok;
+      });
     },
 
     /**

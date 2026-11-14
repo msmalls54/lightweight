@@ -1,0 +1,235 @@
+{
+  "generator_version": "lw-synth-v2.0",
+  "seed": 2026,
+  "sessions": 110,
+  "fitted_from_real": {
+    "band_1arm/strict": {
+      "duration_s": {
+        "n": 3,
+        "mean": 1.15,
+        "sd": 0.132,
+        "min": 1,
+        "max": 1.25
+      },
+      "up_s": {
+        "n": 3,
+        "mean": 0.3,
+        "sd": 0.132,
+        "min": 0.15,
+        "max": 0.4
+      },
+      "biceps_peak": {
+        "n": 3,
+        "mean": 1.001,
+        "sd": 0,
+        "min": 1.001,
+        "max": 1.001
+      },
+      "biceps_saturated_share": 1,
+      "up_delt_ratio": {
+        "n": 3,
+        "mean": 0.081,
+        "sd": 0.013,
+        "min": 0.07,
+        "max": 0.095
+      },
+      "delt_peak": {
+        "n": 3,
+        "mean": 0.188,
+        "sd": 0.034,
+        "min": 0.154,
+        "max": 0.221
+      }
+    },
+    "band_1arm/swing": {
+      "duration_s": {
+        "n": 4,
+        "mean": 0.663,
+        "sd": 0.21,
+        "min": 0.45,
+        "max": 0.95
+      },
+      "up_s": {
+        "n": 4,
+        "mean": 0.225,
+        "sd": 0.119,
+        "min": 0.1,
+        "max": 0.35
+      },
+      "biceps_peak": {
+        "n": 4,
+        "mean": 0.885,
+        "sd": 0.231,
+        "min": 0.539,
+        "max": 1.001
+      },
+      "biceps_saturated_share": 0.75,
+      "up_delt_ratio": {
+        "n": 4,
+        "mean": 1.05,
+        "sd": 0.641,
+        "min": 0.284,
+        "max": 1.785
+      },
+      "delt_peak": {
+        "n": 4,
+        "mean": 0.835,
+        "sd": 0.321,
+        "min": 0.353,
+        "max": 0.999
+      }
+    },
+    "35lb_1arm/strict": {
+      "duration_s": {
+        "n": 5,
+        "mean": 1.599,
+        "sd": 0.353,
+        "min": 1.314,
+        "max": 2.141
+      },
+      "up_s": {
+        "n": 5,
+        "mean": 0.616,
+        "sd": 0.363,
+        "min": 0.265,
+        "max": 1.061
+      },
+      "biceps_peak": {
+        "n": 5,
+        "mean": 0.97,
+        "sd": 0.042,
+        "min": 0.912,
+        "max": 1
+      },
+      "biceps_saturated_share": 0.6,
+      "up_delt_ratio": {
+        "n": 5,
+        "mean": 0.606,
+        "sd": 0.158,
+        "min": 0.411,
+        "max": 0.762
+      },
+      "delt_peak": {
+        "n": 5,
+        "mean": 0.663,
+        "sd": 0.062,
+        "min": 0.587,
+        "max": 0.759
+      }
+    },
+    "35lb_1arm/swing": {
+      "duration_s": {
+        "n": 3,
+        "mean": 0.936,
+        "sd": 0.117,
+        "min": 0.801,
+        "max": 1.011
+      },
+      "up_s": {
+        "n": 3,
+        "mean": 0.457,
+        "sd": 0.092,
+        "min": 0.399,
+        "max": 0.563
+      },
+      "biceps_peak": {
+        "n": 3,
+        "mean": 0.998,
+        "sd": 0.002,
+        "min": 0.996,
+        "max": 0.999
+      },
+      "biceps_saturated_share": 1,
+      "up_delt_ratio": {
+        "n": 3,
+        "mean": 1.166,
+        "sd": 0.135,
+        "min": 1.043,
+        "max": 1.311
+      },
+      "delt_peak": {
+        "n": 3,
+        "mean": 0.99,
+        "sd": 0.013,
+        "min": 0.975,
+        "max": 0.999
+      }
+    },
+    "35lb_bilateral/strict": {
+      "duration_s": {
+        "n": 26,
+        "mean": 1.733,
+        "sd": 0.566,
+        "min": 0.65,
+        "max": 2.585
+      },
+      "up_s": {
+        "n": 26,
+        "mean": 0.538,
+        "sd": 0.195,
+        "min": 0.285,
+        "max": 1.07
+      },
+      "biceps_peak": {
+        "n": 26,
+        "mean": 0.928,
+        "sd": 0.13,
+        "min": 0.554,
+        "max": 1
+      },
+      "biceps_saturated_share": 0.692,
+      "up_delt_ratio": {
+        "n": 26,
+        "mean": 0.876,
+        "sd": 0.469,
+        "min": 0.166,
+        "max": 1.563
+      },
+      "delt_peak": {
+        "n": 26,
+        "mean": 0.718,
+        "sd": 0.353,
+        "min": 0.072,
+        "max": 1.001
+      }
+    },
+    "35lb_bilateral/swing": {
+      "duration_s": {
+        "n": 8,
+        "mean": 1.16,
+        "sd": 0.321,
+        "min": 0.715,
+        "max": 1.511
+      },
+      "up_s": {
+        "n": 8,
+        "mean": 0.363,
+        "sd": 0.106,
+        "min": 0.146,
+        "max": 0.47
+      },
+      "biceps_peak": {
+        "n": 8,
+        "mean": 0.991,
+        "sd": 0.022,
+        "min": 0.937,
+        "max": 1.001
+      },
+      "biceps_saturated_share": 0.875,
+      "up_delt_ratio": {
+        "n": 8,
+        "mean": 1.357,
+        "sd": 0.214,
+        "min": 0.96,
+        "max": 1.689
+      },
+      "delt_peak": {
+        "n": 8,
+        "mean": 0.992,
+        "sd": 0.041,
+        "min": 0.893,
+        "max": 1.02
+      }
+    }
+  }
+}

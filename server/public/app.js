@@ -26,6 +26,16 @@
   // A stale build no longer silences the tab (the hub already keeps ONE speaker); it only asks for a reload.
   const silent = () => MUTED || QUIET || !isSpeaker;
   const syncVoice = () => { try { window.LWAudio?.setEnabled?.(!silent()); } catch { /* ignore */ } };
+  // ④ under the coach line: "Coach is thinking…" while the Gemini voice is generated (it's waited for).
+  window.addEventListener("lwaudio", ev => {
+    const d = ev.detail || {}, w = String(d.what || ""), coachEl = document.getElementById("coach");
+    if (!coachEl || !/^(coach:|clips:coach:|browser:coach:)/.test(w)) return;
+    let el = document.getElementById("coachVoice");
+    if (!el) { el = document.createElement("div"); el.id = "coachVoice"; el.style.cssText = "font-size:12px;opacity:.7;margin-top:2px"; coachEl.insertAdjacentElement("afterend", el); }
+    if (d.type === "voice_wait") el.textContent = "Coach is thinking…";
+    else if (d.type === "fallback") el.textContent = "Gemini voice unavailable: backup voice";
+    else if (d.type === "start" || d.type === "end" || d.type === "skip_late") el.textContent = "";
+  });
   function speakFallback(text) {
     if (silent() || !("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
@@ -590,7 +600,7 @@
   function preloadCountdownVoice() {
     if (lead || silent()) return;
     lead = { audio: null, ms: 0 };
-    fetch("/voice/say", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: LEAD_TEXT }), signal: AbortSignal.timeout?.(15000) })
+    fetch("/voice/say", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: LEAD_TEXT }), signal: AbortSignal.timeout?.(24000) })
       .then(r => (r.ok ? r.blob() : null)).then(b => {
         if (!b) { lead = null; return; }
         const a = new Audio(URL.createObjectURL(b));
@@ -792,7 +802,7 @@
     if (st.ctx === "no-player") return "voice player not loaded";
     if (!audioUnlocked || st.ctx === "suspended") return "audio locked: click anywhere";
     if (st.enabled === false) return "player disabled";
-    if (st.pending > 0 && st.busy_ms > 40000) return "voice queue stuck";
+    if (st.pending > 0 && st.busy_ms > 45000) return "voice queue stuck";
     return "";
   }
   let lastReason = null;
@@ -935,7 +945,8 @@
           if (e.too_short) break;
           if (!selectedSet) $("coach").textContent = e.text || "";
           // ④: the player starts a 7 s clock; if the server's audio isn't there by then, it speaks the text itself (one voice, never both).
-          if (e.audio === "pending" && e.text && !silent() && window.LWAudio?.coachText) LWAudio.coachText(e.set_id, e.text);
+          if (e.audio === "pending" && e.text && !silent() && window.LWAudio?.coachText) LWAudio.coachText(e.set_id, e.text, { clips: e.clips, mode: e.voice_mode });
+          if (!e.text && e.clips?.length && !silent() && window.LWAudio?.coachText) { LWAudio.coachText(e.set_id, "", { clips: e.clips }); loadWorkoutSoon(); loopAfterCoach(e.set_id); break; } // ④ backup voice
           loadWorkoutSoon();
           if (e.audio !== "pending") { // older servers: speak now
             if (e.text) say(e.text); else playClip(e.fallback_clip);

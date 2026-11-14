@@ -14,6 +14,8 @@ export interface SynthRep {
   deltDown?: number;
   /** Left biceps peak when arm = "both" (imbalance). Default = bi. */
   lBi?: number;
+  /** Left front delt peak when arm = "both". Default = delt (scaled like the left biceps if lBi is set via lDelt). */
+  lDelt?: number;
   upMs?: number;   // default 800
   holdMs?: number; // default 200
   downMs?: number; // default 1000
@@ -58,7 +60,7 @@ function rng(seed: number) {
 }
 
 /** 0..1 envelope shape at time u (ms) into a rep. */
-function shape(r: Required<Omit<SynthRep, "arm" | "lBi">>, u: number): number {
+function shape(r: Required<Omit<SynthRep, "arm" | "lBi" | "lDelt">>, u: number): number {
   if (u < 0) return 0;
   if (u < r.upMs) return 0.5 - 0.5 * Math.cos((Math.PI * u) / r.upMs);
   u -= r.upMs;
@@ -87,6 +89,7 @@ export function synth(reps: SynthRep[], opts: SynthOptions = {}): Synth {
     delt: r.delt ?? 0.08,
     deltDown: r.deltDown ?? r.delt ?? 0.08,
     lBi: r.lBi ?? r.bi ?? 0.8,
+    lDelt: r.lDelt ?? r.delt ?? 0.08,
     upMs: r.upMs ?? 800,
     holdMs: r.holdMs ?? 200,
     downMs: r.downMs ?? 1000,
@@ -120,7 +123,7 @@ export function synth(reps: SynthRep[], opts: SynthOptions = {}): Synth {
       }
       if (r.arm === "L" || r.arm === "both") {
         pct[2] += (r.arm === "both" ? r.lBi : r.bi) * s;
-        pct[3] += delt * s;
+        pct[3] += (r.arm === "both" ? delt * (r.lDelt / (r.delt || 1)) : delt) * s;
       }
     });
     for (let c = 0; c < 4; c++) {
