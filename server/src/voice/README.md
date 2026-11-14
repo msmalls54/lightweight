@@ -83,3 +83,18 @@ if no clip is cached. One queue: never two voices.
   `[voice] set X: gemini failed (timeout) -> clips 16.1 s` (the speaker tab POSTs `/voice/log`).
 - `npm run voice:warm`: generates every missing clip (retries with backoff) and lists what's still missing
   (`--check` only reports). Exit code 1 if any clip is missing.
+
+## ElevenLabs fallback (`src/voice/elevenlabs.ts`, `chain.ts`)
+Live summaries/answers (`speak`, `/voice/say`): **Gemini flash-tts -> ElevenLabs -> stitched clips -> browser**.
+ElevenLabs runs only when Gemini errors or times out. Plain fetch, no SDK: `POST /v1/text-to-speech/{voice}`,
+`xi-api-key`, model `eleven_flash_v2_5`, 8 s timeout, `pcm_24000` (wrapped as WAV) -> `wav_24000` ->
+`mp3_44100_128` (served as audio/mpeg) depending on what the plan allows.
+- Keys (repo-root `.env`): `ELEVENLABS_API_KEY`; optional `ELEVENLABS_VOICE_ID` (else a premade male coach-style
+  voice is picked from `GET /v1/voices`, else the docs' example voice `JBFqnCBsd6RMkjVDRZzb`), `ELEVENLABS_MODEL_ID`.
+- `LW_TTS_PROVIDER=auto` (default: Gemini, then ElevenLabs) | `elevenlabs` (skip Gemini) | `gemini`.
+- Without `ELEVENLABS_API_KEY` everything is exactly the Gemini-only path.
+- `/voice/say` sends `x-lw-tts: elevenlabs; ms=1200; after=gemini timeout`; the per-set log reads
+  `[voice] set X: gemini timeout -> elevenlabs 1.2 s`.
+- `npm run voice:warm`: a clip that fails on Gemini is made with ElevenLabs (provider recorded in `clips.json`).
+  `npm run voice:warm -- --provider elevenlabs` regenerates every clip in the ElevenLabs voice (57 clips = 1,038
+  characters). Live check: `npx tsx scripts/voice-eleven-check.ts`.
