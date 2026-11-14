@@ -504,15 +504,32 @@
     const on = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2l3-2.5v9L4.5 10h-2z"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6.5 6.5 0 0 1 0 9"/></svg>';
     const off = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2l3-2.5v9L4.5 10h-2z"/><path d="M11 6l3.5 4M14.5 6L11 10"/></svg>';
     if (MUTED) { el.innerHTML = `${off}Muted`; el.title = "Opened with ?mute=1: never plays voice"; el.className = ""; return; }
-    el.innerHTML = isSpeaker ? `${on}This tab speaks` : `${off}${hasSpeaker ? "Text only · click to speak here" : "No speaker"}`;
-    el.title = isSpeaker ? "Voice plays on this tab" : "Click to play the voice on this tab";
-    el.className = isSpeaker ? "on" : "";
+    el.innerHTML = isSpeaker ? `${on}This tab speaks` : `${off}This tab is silent: click to speak here`;
+    el.title = isSpeaker ? "Voice plays on this tab" : "The voice plays on another dashboard tab. Click to play it here.";
+    el.className = isSpeaker ? "on" : "silent";
+    renderUnlock();
   }
-  $("spk").onclick = run(async () => {
+  /** Make THIS tab the speaker before a user action starts something (Start set, voice command, Test voice, New session). */
+  async function claimSpeaker() {
+    unlockAudio(); // inside the user gesture
     if (MUTED || isSpeaker || !clientId) return;
-    await post("/speaker/claim", { client_id: clientId });
+    try { await post("/speaker/claim", { client_id: clientId }); } catch { return; }
+    for (let i = 0; i < 20 && !isSpeaker; i++) await sleep(50); // the server confirms over SSE
+  }
+  $("spk").onclick = run(claimSpeaker);
+
+  // Sound needs one user gesture on this tab (browser autoplay rules).
+  let audioUnlocked = false;
+  function unlockAudio() {
+    if (MUTED) return;
     try { window.LWAudio?.unlock?.(); } catch { /* ignore */ }
-  });
+    audioUnlocked = true;
+    renderUnlock();
+  }
+  function renderUnlock() {
+    const show = !MUTED && !QUIET && isSpeaker && !audioUnlocked;
+    $("unlockNote").classList.toggle("hidden", !show);
+  }
 
   // ------------------------------------------------------------ hands-free countdown
   // Start set = a server-timed countdown ("Pick them up. Three, two, one, curl!"); the set arms at 0,
@@ -562,6 +579,7 @@
     setTimeout(() => { clearInterval(cdTimer); clearTimeout(cdVoiceTimer); $("cd").classList.remove("show"); }, delay);
   }
   function onCountdown(e) {
+    if (e.phase === "start" && !MUTED && !QUIET && !isSpeaker) toast("This tab is silent: the voice plays on another tab. Click \"This tab is silent\" to hear it here.", 6000);
     if (e.phase === "start") { cancelLoop(); showCountdown(e.ends_at); playCountdownVoice(e.ms); }
     else if (e.phase === "go") hideCountdown(900);
     else hideCountdown();
@@ -663,9 +681,10 @@
   $("testVoice").onclick = () => {
     if (QUIET) { toast("Quiet mode is on: no audio."); return; }
     if (MUTED) { toast("This tab is muted (?mute=1)."); console.info("[test voice] rep_1 ->", audioOut.label); return; }
-    try { window.LWAudio?.unlock?.(); } catch { /* ignore */ }
-    applySink(audioOut.id);
-    if (window.LWAudio?.playClip) window.LWAudio.playClip("rep_1"); else toast("Voice player not loaded.");
+    claimSpeaker().then(() => {
+      applySink(audioOut.id);
+      if (window.LWAudio?.playClip) window.LWAudio.playClip("rep_1"); else toast("Voice player not loaded.");
+    });
   };
   try { navigator.mediaDevices?.addEventListener?.("devicechange", () => { refreshOutputs(); }); } catch { /* ignore */ }
   window.LWAudioOut = { refresh: refreshOutputs, get current() { return audioOut; } };
@@ -731,7 +750,7 @@
       if (st?.countdown_ms_left != null || st?.set?.set_no) return; // already counting down / mid-set
       startSet();
     } else if (cmd === "stop") stopSet();
-    else if (cmd === "new_session") run(() => post("/session/start", { person: "Mike", walkup: false, arms: arms() }))();
+    else if (cmd === "new_session") run(async () => { await claimSpeaker(); return post("/session/start", { person: "Mike", walkup: false, arms: arms() }); })();
     else if (cmd === "workout") speakWorkout();
   }
   function ensureRec() {
@@ -776,7 +795,7 @@
   // ------------------------------------------------------------ SSE
   let es;
   function connect() {
-    es = new EventSource(MUTED ? "/events?mute=1" : "/events");
+    es = new EventSource(`/events?visible=${document.visibilityState === "visible" ? 1 : 0}${MUTED ? "&mute=1" : ""}`);
     es.onopen = () => { $("sseDot").className = "dot on"; $("sseText").textContent = "Linked"; $("sseWrap").classList.add("ok"); };
     es.onerror = () => { $("sseDot").className = "dot off"; $("sseText").textContent = "Server link lost, retrying"; $("sseWrap").classList.remove("ok"); };
     es.onmessage = ev => {
@@ -928,7 +947,7 @@
 
   // ------------------------------------------------------------ controls
   const arms = () => { const a = []; if ($("armR").checked) a.push("R"); if ($("armL").checked) a.push("L"); return a.length ? a : ["R"]; };
-  $("btnNew").onclick = run(() => post("/session/start", { person: "Mike", walkup: false, arms: arms() }));
+  $("btnNew").onclick = run(async () => { await claimSpeaker(); return post("/session/start", { person: "Mike", walkup: false, arms: arms() }); });
   $("btnWalkup").onclick = run(async () => {
     const name = (prompt("Walk-up's name?") || "").trim();
     if (!name) return;
@@ -936,10 +955,10 @@
     await post("/session/start", { person: name, walkup: true, arms: ["R"] });
   });
   $("btnCal").onclick = () => calibrate();
-  const startSet = run(() => post("/set/countdown", {
+  const startSet = run(async () => { await claimSpeaker(); return post("/set/countdown", {
     exercise: $("exercise").value || "dumbbell curl", variant: $("variant").value,
     load_lb: Number($("load").value) || undefined, arms: arms(), auto_next: $("autoNext").checked,
-  }));
+  }); });
   const stopSet = run(() => { cancelLoop(); return post("/set/stop"); });
   $("cdCancel").onclick = stopSet;
   $("btnStart").onclick = startSet;
@@ -1000,8 +1019,11 @@
   }
   if (!hookMusic()) window.addEventListener("load", hookMusic);
   // Browsers only start Web Audio after a user gesture: unlock on the first click/key.
-  const unlock = () => { if (!silent()) try { window.LWAudio?.unlock?.(); } catch { /* ignore */ } };
-  window.addEventListener("pointerdown", unlock, { once: true });
-  window.addEventListener("keydown", unlock, { once: true });
+  window.addEventListener("pointerdown", unlockAudio, true);
+  window.addEventListener("keydown", unlockAudio, true);
+  // Report visibility: a visible tab takes the voice from a background one; a tab hidden >30 s gives it up.
+  document.addEventListener("visibilitychange", () => {
+    if (clientId) post("/speaker/visibility", { client_id: clientId, visible: document.visibilityState === "visible" }).catch(() => {});
+  });
   if (window.__lwNoVoice) console.info("voice-player.js not found; using browser speech as a fallback.");
 })();

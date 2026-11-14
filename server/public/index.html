@@ -59,6 +59,9 @@
   #spk { cursor: pointer; border-radius: 8px; padding: 2px 6px; }
   #spk:hover { color: var(--text); }
   #spk.on { color: var(--text); }
+  #spk.silent { color: #111; background: var(--warn); font-weight: 600; padding: 3px 10px; }
+  #spk.silent:hover { color: #000; }
+  #unlockNote { flex: none; color: #111; background: var(--warn); font-size: var(--fs-s); font-weight: 600; padding: 5px 12px; border-radius: 8px; }
   #spk svg { width: 15px; height: 15px; }
   .grow { flex: 1; }
   #who { font-size: var(--fs-m); font-weight: 600; text-align: right; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -265,6 +268,7 @@
     <span id="micWrap" class="hidden"><span class="sep"></span><span id="mic"></span></span>
     <span class="sep"></span><span id="coachOut" title="Where the coach's voice plays (Settings → Coach audio)">Coach → System default</span>
   </div>
+  <span id="unlockNote" class="hidden">Click anywhere to enable sound</span>
   <button id="quietBtn" title="Quiet mode: no audio on any dashboard (Q)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z"/></svg><span>Quiet</span><kbd>Q</kbd></button>
   <span class="grow"></span>
   <span id="who">No session</span>
