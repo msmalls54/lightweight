@@ -53,8 +53,15 @@ export interface EngineConfig extends RepThresholds {
   /** Rest/MVC used before calibration (raw 14-bit ENV). */
   defaultRest: number;
   defaultMvc: number;
-  /** %MVC clamp range. */
+  /** %MVC clamp for live frames and reported peak/mean values. */
   pctMax: number;
+  /** %MVC clamp for detection and scoring (higher, so a too-low MVC doesn't flatten reps). */
+  detectPctMax: number;
+  /** After a set with reps, raise each channel's MVC to the set's own percentile (raise-only). */
+  autoRaiseMvc: boolean;
+  autoRaisePercentile: number;
+  /** Raw samples kept per set for autoRaiseMvc (200 Hz x 5 min). */
+  maxSetSamples: number;
   /** Calibration: reject a channel whose (mvc - rest) is below this (raw counts). */
   minMvcSpan: number;
   /** Calibration: rest above this means the channel isn't relaxed or is on RAW (sits ~8150). */
@@ -64,7 +71,7 @@ export interface EngineConfig extends RepThresholds {
   /** Live frames: one per this many ms of sample time (~20 Hz). */
   liveIntervalMs: number;
   /** A set auto-ends after this long without a rep (only once it has at least one rep). */
-  setEndGapMs: number;
+  autoEndMs: number;
   /** Max pre-onset samples kept while the biceps hovers between lo and hi. */
   maxPreOnsetMs: number;
   /** Device time jumping back more than this = device restart; rebase the timeline. */
@@ -113,11 +120,15 @@ export const DEFAULT_CONFIG: EngineConfig = {
   defaultRest: 550,
   defaultMvc: 14960,
   pctMax: 1.5,
+  detectPctMax: 3,
+  autoRaiseMvc: true,
+  autoRaisePercentile: 0.99,
+  maxSetSamples: 60_000,
   minMvcSpan: 1000,
   restMax: 4000,
   mvcPercentile: 0.95,
   liveIntervalMs: 50,
-  setEndGapMs: 10_000,
+  autoEndMs: 10_000,
   maxPreOnsetMs: 3000,
   timeResetMs: 2000,
 
