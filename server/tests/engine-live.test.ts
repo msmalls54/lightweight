@@ -111,22 +111,28 @@ test("live run 1 with the DEFAULT calibration (walk-up / no calibration): sane r
   assert.equal(reps.filter((r) => r.cheat).length, 0);
 });
 
-test("live run 1: calibration holds armed as a set are not counted as reps", () => {
-  // Arm the set from t=0 so the calibration flex / raise holds (31-47 s) fall inside it.
+test("live run 1: a set armed during calibration never flags Mike's real curls", () => {
+  // Arm the set from t=0 so the calibration flex / raise holds (31-47 s) fall inside it. Short holds
+  // (2.4-3.3 s) look like slow reps to the biceps and may count; what matters is that they never become
+  // the clean reference on their own (2 plausible reps needed) and so never turn real curls into cheats.
   const e = new Engine({ autoEndMs: 30_000 });
   e.setCalibration(DEFAULT_CAL);
-  e.startSet({ session_id: "x", set_id: "cal", person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R", "L"] });
-  const reps: number[] = [];
-  for (let i = 0; i < rows.length && rows[i][0] - T0 < 50_000; i += 40) {
+  const start = () => e.startSet({ session_id: "x", set_id: "cal", person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R", "L"] });
+  start();
+  const reps: { t: number; cheat: boolean; d: number }[] = [];
+  for (let i = 0; i < rows.length && rows[i][0] - T0 < 90_000; i += 40) {
     const b = rows.slice(i, i + 40);
     for (const ev of e.ingest({ device: "d", seq: i, t0_ms: b[0][0], dt_ms: 5, ch: [1, 2, 3, 4].map((c) => b.map((r) => r[c])) })) {
-      if (ev.type === "rep") reps.push(sec(ev.start_ms));
+      if (ev.type === "rep") reps.push({ t: sec(ev.start_ms), cheat: ev.cheat, d: ev.end_ms - ev.start_ms });
+      if (ev.type === "set_end") start();
     }
   }
-  const end = e.endSet();
-  // the L biceps flex hold at ~40 s (plateau 2.3 s) is rejected; what's left are the R flex and the raise/curl transitions
-  assert.ok(!reps.some((t) => Math.abs(t - 39.9) < 1), `hold counted: ${reps.join(", ")}`);
-  assert.ok((end?.reps ?? []).every((r) => r.end_ms - r.start_ms <= 4000));
+  for (const t of [61.7, 68.5, 82.5]) {
+    const r = reps.find((x) => Math.abs(x.t - t) < 0.5);
+    assert.ok(r, `curl at ~${t}s missing`);
+    assert.equal(r!.cheat, false, `curl at ~${t}s flagged`);
+  }
+  assert.ok(reps.every((r) => r.d <= 3500), "nothing longer than maxRepMs");
 });
 
 test("updateRest changes only the rest levels and keeps the session reference consistent", () => {
@@ -136,4 +142,39 @@ test("updateRest changes only the rest levels and keeps the session reference co
   assert.deepEqual(c.rest, [600, 500, 735, 631]); // NaN and implausible values keep the old rest
   assert.deepEqual(c.mvc, LIVE_CAL.mvc);
   assert.deepEqual(e.getCalibration()!.rest, [600, 500, 735, 631]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Live run 3 (Nov 14): bilateral 35 lb, slow reps that saturate the ENV near the top for ~1.5-2 s.
+// The engine on main counted ONE rep (the hold guards rejected real reps). Server config + calibration.
+const CSV3 = new URL("../../data/coach/history/raw/2026-11-14-live3-200hz-10reps.csv", import.meta.url);
+const rows3 = readFileSync(CSV3, "utf8").trim().split(/\r?\n/).slice(1).filter((l) => l.trim()).map((l) => l.split(",").map(Number));
+const T3 = rows3[0][0];
+const CAL3: Calibration = { rest: [539, 477, 735, 609], mvc: [14950, 14926, 14938, 12969], ok: true, problems: [] };
+
+test("live run 3: all 7 slow bilateral reps counted, set auto-ends 8 s after the last", () => {
+  const e = new Engine({ autoEndMs: 8_000, mvcPercentile: 0.99 }); // server ENGINE_CONFIG
+  e.setCalibration(CAL3);
+  let armed = false;
+  const reps: { t: number; d: number }[] = [];
+  let endAt: number | null = null, endReps = -1;
+  for (let i = 0; i < rows3.length; i += 40) {
+    const b = rows3.slice(i, i + 40);
+    // set armed ~6 s before the first rep (server 21:49:15, reps from ~21:49:21)
+    if (!armed && b[0][0] - T3 >= 240_500) {
+      e.startSet({ session_id: "live3", set_id: "set", person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R", "L"] });
+      armed = true;
+    }
+    for (const ev of e.ingest({ device: "lw-uno-1", seq: i / 40, t0_ms: b[0][0], dt_ms: 5, ch: [1, 2, 3, 4].map((c) => b.map((r) => r[c])) })) {
+      if (ev.type === "rep") reps.push({ t: (ev.start_ms - T3) / 1000, d: (ev.end_ms - ev.start_ms) / 1000 });
+      if (ev.type === "set_end" && endAt === null) { endAt = (b[0][0] - T3) / 1000; endReps = ev.reps.length; }
+    }
+  }
+  assert.ok(reps.length >= 7, `${reps.length} reps: ${reps.map((r) => r.t.toFixed(1)).join(", ")}`);
+  for (const t of [246.7, 250.1, 253.2, 256.0, 262.0, 266.3, 271.2]) assert.ok(reps.some((r) => Math.abs(r.t - t) < 0.5), `rep at ~${t}s missing`);
+  for (const r of reps) assert.ok(r.d >= 1.5 && r.d <= 3, `rep at ${r.t.toFixed(1)}s lasts ${r.d.toFixed(2)}s`);
+  assert.ok(endAt !== null, "set never auto-ended");
+  const lastEnd = Math.max(...reps.map((r) => r.t + r.d));
+  assert.ok(endAt! - lastEnd >= 7.5 && endAt! - lastEnd <= 9, `set_end ${endAt} vs last rep end ${lastEnd.toFixed(1)}`);
+  assert.equal(endReps, reps.length);
 });

@@ -278,3 +278,18 @@ test("real 35 lb right arm: MVC from the FLEX hold, raised from the first strict
   const ref = sets.CHEAT.reps[0].baseline_up_delt_ratio!;
   assert.ok(ref > 0.6 && ref < 0.85, `rescaled ref ${ref}`);
 });
+
+test("real 35 lb right arm: the 4.6 s raise hold (armed as a set) is not a rep", () => {
+  const e = new Engine();
+  e.setCalibration({ rest: [550, 620, 800, 900], mvc: [14960, 14960, 14960, 14960], ok: true, problems: [] });
+  e.startSet({ session_id: "hold", set_id: "hold", person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R"] });
+  const starts: number[] = [];
+  rowsR35.forEach((r, i) => {
+    if (r.t > 16_000) return; // the RAISE hold at ~7 s (R biceps co-contracts for 4.5 s)
+    const dt = i + 1 < rowsR35.length ? rowsR35[i + 1].t - r.t : 50;
+    for (const ev of e.ingest({ device: "h", seq: i, t0_ms: r.t, dt_ms: dt, ch: r.ch.map((x) => [x]) })) if (ev.type === "rep") starts.push(ev.start_ms);
+  });
+  const end = e.endSet();
+  assert.equal(starts.length, 0);
+  assert.equal(end?.reps.length ?? 0, 0);
+});
