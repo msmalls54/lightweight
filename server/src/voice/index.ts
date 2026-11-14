@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Hono } from "hono";
 import { loadGeminiKey } from "./env.js";
-import { TTS_MODEL, voiceId } from "./models.js";
+import { SAY_TTS_MODELS, SAY_TTS_TIMEOUT_MS, SPOKEN_FIRST_SENTENCE_MAX_WORDS, TTS_MODEL, voiceId } from "./models.js";
 import { geminiSynth, type Synth } from "./tts.js";
 import { isWav, trimSilence } from "./wav.js";
 
@@ -53,7 +53,7 @@ interface ClipMeta {
   trimmed?: boolean;
 }
 
-const state: { synth?: Synth; cacheDir: string; ready: boolean; failed: string[] } = {
+const state: { synth?: Synth; synthIsGemini?: boolean; saySynth?: Synth; cacheDir: string; ready: boolean; failed: string[] } = {
   cacheDir: DEFAULT_VOICE_CACHE,
   ready: false,
   failed: [],
@@ -113,6 +113,8 @@ export interface InitVoiceOptions {
 export async function initVoice(opts: InitVoiceOptions): Promise<void> {
   state.cacheDir = opts.cacheDir;
   state.synth = opts.synth ?? geminiSynth({ apiKey: opts.apiKey });
+  state.synthIsGemini = !opts.synth;
+  state.saySynth = undefined;
   state.failed = [];
   const log = opts.log ?? ((m: string) => console.log(`[voice] ${m}`));
   fs.mkdirSync(state.cacheDir, { recursive: true });
@@ -175,6 +177,32 @@ const sayCache = new Map<string, Buffer>();
 
 const sayInFlight = new Map<string, Promise<Buffer>>();
 
+/** Live TTS: SAY_TTS_MODELS order with a short per-model timeout (tests inject via initVoice's synth). */
+function getSaySynth(): Synth {
+  if (state.saySynth) return state.saySynth;
+  if (state.synth && !state.synthIsGemini) return state.synth; // injected (tests)
+  const apiKey = loadGeminiKey();
+  if (!apiKey) throw new Error("GEMINI_API_KEY not set (repo-root .env)");
+  state.saySynth = geminiSynth({ apiKey, models: SAY_TTS_MODELS, timeoutMs: SAY_TTS_TIMEOUT_MS });
+  return state.saySynth;
+}
+
+/**
+ * The part of a coach line that gets spoken: the first sentence, at most 15 words (cut at a comma or
+ * colon if it's longer). The full line is shown on screen. Same rule as LWAudio's spokenPart().
+ */
+export function spokenPart(text: string, maxWords = SPOKEN_FIRST_SENTENCE_MAX_WORDS): string {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  const first = (t.match(/^.*?[.!?](?=\s|$)/) ?? [t])[0].trim();
+  const w = first.split(" ");
+  if (w.length <= maxWords) return first;
+  const head = w.slice(0, maxWords).join(" ");
+  const cut = Math.max(head.lastIndexOf(","), head.lastIndexOf(":"), head.lastIndexOf(";"));
+  const out = (cut > 20 ? head.slice(0, cut) : head).replace(/[,:;\s]+$/, "");
+  return out + ".";
+}
+
 /**
  * Live Gemini TTS for summaries and Q&A answers. Short in-memory cache by text, and concurrent
  * calls for the same text share one Gemini request (the server's pre-TTS and the speaker tab's
@@ -189,7 +217,7 @@ export async function speak(text: string): Promise<Buffer> {
   if (pending) return pending;
   const p = (async () => {
     try {
-      const wav = trimSilence(await getSynth()(t));
+      const wav = trimSilence(await getSaySynth()(t));
       sayCache.set(t, wav);
       if (sayCache.size > 50) sayCache.delete(sayCache.keys().next().value!);
       return wav;
@@ -253,6 +281,8 @@ export function registerVoiceRoutes(app: Hono<any, any, any>): void {
 /** Test hook: reset module state. */
 export function _resetVoiceForTests(): void {
   state.synth = undefined;
+  state.saySynth = undefined;
+  state.synthIsGemini = undefined;
   state.ready = false;
   state.failed = [];
   state.cacheDir = DEFAULT_VOICE_CACHE;

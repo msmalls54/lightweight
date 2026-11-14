@@ -234,7 +234,7 @@ FACTS (this set, computed by code): ${compact({ ...(lift ? { lift } : {}), ...fo
 EARLIER_SETS_TODAY (same lift): ${compact(previousSetsBrief(ctx, set))}
 REQUIRED DECISION: ${decisionLine(set.decision?.next)} (engine reason: ${set.decision?.reason ?? ""})
 
-Write the spoken summary of this set: at most 3 short sentences, at most ${SPOKEN_MAX_WORDS} words (about 8 seconds out loud). Every word counts.
+Write the summary of this set: at most 3 short sentences, at most ${SPOKEN_MAX_WORDS} words. ONLY THE FIRST SENTENCE IS SPOKEN ALOUD (the rest is shown on screen), so the first sentence must carry the main point in at most 15 words: the cheat reps and why, or that the set was clean.
 - ${STATE_HINT(facts)}
 - End with the required decision in a few words ("${decisionShort(set.decision?.next)}").
 Example of the style for a set with cheats (different numbers, 22 words): "Reps 4 and 8: right shoulder at 8 times normal, that's a swing. Rep 5 smaller. Next set, stop at the first cheat."`;

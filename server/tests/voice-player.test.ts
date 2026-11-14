@@ -187,3 +187,37 @@ test("voices never overlap: set-end clips, then the browser line", async () => {
   await sleep(900);
   assert.deepEqual(log, ["play:set_done", "play:two_cheats", "browser:Two cheats."]);
 });
+
+test("coach lines: only the first sentence is spoken (Gemini and browser), full text stays on screen", async () => {
+  const line = "Reps 4 and 8: right shoulder at 9 times normal, that's a swing. Rep 5 smaller. Next set, stop at the first cheat.";
+  const a = load({ sayDelayMs: 5 });
+  const said: string[] = [];
+  const realSay = a.A.say.bind(a.A);
+  a.A.say = (t: string, o?: { fallbackMs?: number }) => (said.push(t), realSay(t, o));
+  a.A.coachText("s1", line);
+  await a.A.coachAudio("s1", { ok: true, text: line });
+  assert.deepEqual(said, ["Reps 4 and 8: right shoulder at 9 times normal, that's a swing."]);
+  const b = load();
+  b.A.fallbackMs = 20;
+  b.A.coachText("s2", line);
+  await sleep(400);
+  assert.deepEqual(b.spoken.map((x) => x.text), ["Reps 4 and 8: right shoulder at 9 times normal, that's a swing."]);
+});
+
+test("spokenPart is the same in the browser and on the server", async () => {
+  const { spokenPart } = await import("../src/voice/index.js");
+  const { A } = load();
+  const js = (A as unknown as { spokenPart(t: string): string }).spokenPart;
+  for (const t of [
+    "All 3 reps clean, shoulder in its normal range. Same groove: elbows pinned, squeeze at the top.",
+    "From rep 6 on, your right shoulder took over, 8 to 12 times normal, and it never came back down after that point. Next set.",
+    "One sentence without a period",
+    "Reps 4, 5 and 8: your right shoulder did the work on every one of those reps today, that is a swing, plain and simple.",
+    "",
+  ]) {
+    assert.equal(js(t), spokenPart(t), t);
+    assert.ok(spokenPart(t).split(/\s+/).filter(Boolean).length <= 15, spokenPart(t));
+  }
+  assert.equal(spokenPart("From rep 6 on, your right shoulder took over, 8 to 12 times normal, and it never came back down after that point. Next set."),
+    "From rep 6 on, your right shoulder took over, 8 to 12 times normal.");
+});

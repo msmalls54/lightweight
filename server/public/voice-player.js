@@ -11,6 +11,7 @@
 //                                    instead (speechSynthesis) and the late Gemini audio is skipped.
 //   LWAudio.coachText(setId, text)   the server's coach text arrived (audio still pending): starts the 5 s
 //                                    clock; if coachAudio hasn't come by then, the browser speaks it.
+//                                    Coach lines: only the first sentence (<= 15 words) is spoken.
 //   LWAudio.coachAudio(setId, msg)   the server's coach_audio event ({ok, text, fallback_clip}): plays the
 //                                    Gemini audio, unless the browser already spoke this set's line.
 //   LWAudio.cooldownMs = 3000        min gap between call-out starts
@@ -199,6 +200,20 @@
     }, what || "browser");
   }
 
+  // The spoken part of a coach line: first sentence, <= 15 words (same rule as the server's spokenPart()).
+  function spokenPart(text, maxWords) {
+    maxWords = maxWords || 15;
+    var t = String(text || "").replace(/\s+/g, " ").trim();
+    if (!t) return "";
+    var m = t.match(/^.*?[.!?](?=\s|$)/);
+    var first = (m ? m[0] : t).trim();
+    var w = first.split(" ");
+    if (w.length <= maxWords) return first;
+    var head = w.slice(0, maxWords).join(" ");
+    var cut = Math.max(head.lastIndexOf(","), head.lastIndexOf(":"), head.lastIndexOf(";"));
+    return (cut > 20 ? head.slice(0, cut) : head).replace(/[,:;\s]+$/, "") + ".";
+  }
+
   // Run fn once nothing else is talking; fn must return a promise. Holds `busy` while it runs.
   function whenFree(fn) {
     return new Promise(function (resolve) {
@@ -363,7 +378,7 @@
         c.done = true; // the browser owns this line now: the Gemini audio will be skipped
         emit("fallback", "coach:" + setId);
         whenFree(function () {
-          return browserSpeak(text, "browser:coach");
+          return browserSpeak(spokenPart(text), "browser:coach");
         });
       }, LWAudio.fallbackMs);
     },
@@ -379,9 +394,10 @@
         clearTimeout(c.timer);
         c.done = true;
       }
-      if (msg.ok && msg.text) return LWAudio.say(msg.text);
+      // Only the first sentence is spoken (the server pre-generates exactly that: msg.spoken).
+      if (msg.ok && (msg.spoken || msg.text)) return LWAudio.say(msg.spoken || spokenPart(msg.text));
       if (c && c.text) return whenFree(function () {
-        return browserSpeak(c.text, "browser:coach");
+        return browserSpeak(spokenPart(c.text), "browser:coach");
       });
       return msg.fallback_clip ? LWAudio.playClip(msg.fallback_clip) : Promise.resolve(false);
     },
@@ -389,6 +405,8 @@
     isSpeaking: function () {
       return busy;
     },
+
+    spokenPart: spokenPart,
   };
 
   window.LWAudio = LWAudio;
