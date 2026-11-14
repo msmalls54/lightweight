@@ -60,7 +60,7 @@
     const el = document.createElement("div");
     el.className = `bar ${c.kind}`;
     el.innerHTML = `<div class="val">0%</div><div class="track"><div class="mvc" style="bottom:${(100 / BAR_MAX).toFixed(1)}%"></div><div class="fill"></div></div>
-      <div class="lbl">${c.arm}<small>${c.kind === "bi" ? "biceps · target" : "front delt · snitch"}</small></div>`;
+      <div class="lbl">${c.arm}<small>${c.kind === "bi" ? "biceps · target" : "front delt · cheat check"}</small></div>`;
     $("bars").appendChild(el);
     return { el, val: el.querySelector(".val"), fill: el.querySelector(".fill"), i };
   });
