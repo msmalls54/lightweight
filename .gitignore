@@ -8,6 +8,7 @@ build/
 .env
 .env.*
 !.env.example
+arduino_secrets.h
 
 # local data
 *.sqlite

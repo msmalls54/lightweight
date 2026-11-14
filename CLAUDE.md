@@ -49,7 +49,9 @@ Placement: center of the muscle belly, electrodes in line with the fibers. Shave
 
 ## Machine setup (done Nov 13, verified)
 Already installed on this laptop; don't reinstall.
-- **Arduino:** `arduino-cli` 1.5.1 + core `arduino:renesas_uno` 1.6.0. FQBN `arduino:renesas_uno:unor4wifi`. `WiFiS3`, `Arduino_LED_Matrix` (bundled) and `ArduinoJson` 7.4.3 compile together. Upload not yet tested (no board connected).
+- **Arduino:** `arduino-cli` 1.5.1 + core `arduino:renesas_uno` 1.6.0. FQBN `arduino:renesas_uno:unor4wifi`. `WiFiS3`, `Arduino_LED_Matrix` (bundled) and `ArduinoJson` 7.4.3 compile together. `ArduinoGraphics` 1.1.5 installed for matrix text.
+- **UNO bench-tested Nov 13:** shows up on **COM8**, uploads in ~4 s. Wi-Fi module firmware 0.6.0 (= latest, no update needed); scans 2.4 GHz fine. Timing: 4-channel 14-bit `analogRead` = ~100 µs, LED matrix render = ~50 µs; a 200 Hz `micros()` loop with a matrix render every 10th tick ran 1000 ticks, worst 4 µs late, 0 missed. CPU is not a constraint.
+- **Firewall:** inbound allow rules for `node.exe` already exist (Public profile, plus a TCP 3000 rule from helmet-agent), so the UNO can reach the laptop server over a hotspot.
 - **Node:** v24.15.0, npm 11.12.1. These are in the npm cache, so `npm install --prefer-offline` works on bad Wi-Fi: `mcp-use@1.34.8`, `better-sqlite3@13.0.3`, `zod@4.6.7`, `react`/`react-dom@19.3.1`, `@mcp-use/tunnel@0.2.2`, `@elevenlabs/elevenlabs-js@2.78.0`, `@google/genai@3.3.0`, dev: `tsx@4.23.15`, `typescript@5.9.3`, `@types/node@^22`, `@types/better-sqlite3@9.6.0`, `@types/react*@19.3.0`. Use helmet-agent's `overrides` block (`@modelcontextprotocol/sdk` 1.32.1, `@hono/node-server` 1.19.17, `hono` 4.13.13).
 - **Tunnels:** `cloudflared` 2026.10.1 (quick tunnel, no account). `ngrok` 3.39.13 via winget; no authtoken configured yet.
 - **Secrets** (ElevenLabs, Gemini, ngrok) go in `.env`, which is gitignored. Never commit keys.
