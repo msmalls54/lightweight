@@ -61,6 +61,12 @@ export class Store {
   }
   endSession(id: string) { this.db.prepare("UPDATE sessions SET ended_at=? WHERE session_id=? AND ended_at IS NULL").run(new Date().toISOString(), id); }
   saveCalibration(id: string, c: Calibration) { this.db.prepare("UPDATE sessions SET calibration=? WHERE session_id=?").run(JSON.stringify(c), id); }
+  /** The person's most recent saved calibration (live, non-walk-up sessions only). */
+  lastCalibration(person: string): Calibration | null {
+    const r = this.db.prepare(`SELECT calibration FROM sessions WHERE person=? AND kind='live' AND is_walkup=0 AND calibration IS NOT NULL
+      ORDER BY started_at DESC LIMIT 1`).get(person) as { calibration: string } | undefined;
+    try { return r ? (JSON.parse(r.calibration) as Calibration) : null; } catch { return null; }
+  }
   getSession(id: string) { return this.db.prepare("SELECT * FROM sessions WHERE session_id=?").get(id) as SessionRow | undefined; }
 
   /** Returns the new batch_id, or null for a duplicate (same device+seq+t0, i.e. a resend). */

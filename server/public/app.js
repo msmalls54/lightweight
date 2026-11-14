@@ -16,21 +16,25 @@
   // ?mute=1: no voice at all (testing at the venue). Cue keys are still logged to the console.
   const MUTED = new URLSearchParams(location.search).has("mute");
   if (MUTED) document.title = "Lightweight (muted)";
+  // Only ONE dashboard speaks: the server picks the speaker (oldest non-muted tab; click the pill to
+  // take over). Every other tab shows text only and never calls /voice/say.
+  let isSpeaker = false, clientId = null;
+  const silent = () => MUTED || !isSpeaker;
   function speakFallback(text) {
-    if (MUTED || !("speechSynthesis" in window)) return;
+    if (silent() || !("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
     speechSynthesis.speak(new SpeechSynthesisUtterance(text));
   }
   function playClip(keys) { // a clip key or an array of keys stitched in order (e.g. ["rep_6", "delt_took_over"])
     if (!keys || (Array.isArray(keys) && !keys.length)) return;
-    if (MUTED) { console.info("[cue]", keys); return; }
+    if (silent()) { console.info("[cue]", keys); return; }
     const A = window.LWAudio;
     if (A && typeof A.playClip === "function") { try { A.playClip(keys); } catch (e) { console.warn("playClip failed", e); } return; }
     speakFallback([].concat(keys).map(k => k.replace(/_/g, " ")).join(". "));
   }
   function say(text) {
     if (!text) return;
-    if (MUTED) { console.info("[say]", text); return; }
+    if (silent()) { console.info("[say]", text); return; }
     const A = window.LWAudio;
     if (A && typeof A.say === "function") { try { A.say(text); } catch (e) { console.warn("say failed", e); } return; }
     speakFallback(text);
@@ -204,7 +208,7 @@
   function renderIdle() {
     $("who").innerHTML = `No session <small>press New session</small>`;
     $("setline").innerHTML = `Ready <span class="idle-note">· press New session (Mike) or Walk-up</span>`;
-    $("setmeta").textContent = "Then Calibrate (C), Start set (S) and curl.";
+    $("setmeta").textContent = "Then Start set (S) and curl. Calibrate (C) is optional.";
     $("armState").className = "armstate idle"; $("armState").textContent = "IDLE";
     $("coach").textContent = "";
   }
@@ -233,7 +237,7 @@
     }
     if (ss) {
       activeArms = s.set?.arms ?? ss.arms;
-      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrated ? (ss.cal_problems.length ? "calibrated ⚠" : "calibrated ✓") : ss.calibrating ? "calibrating…" : "not calibrated (raw)"}</small>`;
+      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "calibrating…" : `calibration: ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "calibrated" : "auto"}${ss.cal_problems?.length ? " ⚠" : ""}`}</small>`;
     } else $("who").textContent = "No session";
     const armed = !!s.set && !ss?.calibrating;
     $("armState").className = `armstate ${armed ? "armed" : "idle"}`;
@@ -245,10 +249,22 @@
     $("btnReplay").disabled = s.mode === "replay";
   }
 
+  function renderSpeaker(hasSpeaker) {
+    const el = $("spk");
+    if (MUTED) { el.textContent = "🔇 Muted tab"; el.title = "Opened with ?mute=1: never plays voice"; el.className = "pill"; return; }
+    el.textContent = isSpeaker ? "🔊 This tab speaks" : hasSpeaker ? "🔇 Text only · click to speak here" : "🔇 No speaker";
+    el.className = `pill speaker${isSpeaker ? " on" : ""}`;
+  }
+  $("spk").onclick = run(async () => {
+    if (MUTED || isSpeaker || !clientId) return;
+    await post("/speaker/claim", { client_id: clientId });
+    try { window.LWAudio?.unlock?.(); } catch { /* ignore */ }
+  });
+
   // ------------------------------------------------------------ SSE
   let es;
   function connect() {
-    es = new EventSource("/events");
+    es = new EventSource(MUTED ? "/events?mute=1" : "/events");
     es.onopen = () => { $("sseDot").className = "dot on"; $("sseText").textContent = "Dashboard linked"; };
     es.onerror = () => { $("sseDot").className = "dot off"; $("sseText").textContent = "Server link lost, retrying"; };
     es.onmessage = ev => {
@@ -256,6 +272,8 @@
       switch (e.type) {
         case "live": live = e.pct; liveAt = performance.now(); break;
         case "status": onStatus(e); break;
+        case "hello": clientId = e.client_id; break;
+        case "speaker": isSpeaker = !!e.you; renderSpeaker(e.has_speaker); break;
         case "history":
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet();
           if (staleId) { renderIdle(); break; } // old fake/replay/stale run: don't show its reps
@@ -358,18 +376,19 @@
   const MIN_BICEPS_MVC = 8000;
   const LEAD_IN_TEXT = "Three. Two. One. Squeeze!";
   function preloadLeadIn() {
-    if (MUTED) return Promise.resolve(null);
+    if (silent()) return Promise.resolve(null);
     return fetch("/voice/say", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: LEAD_IN_TEXT }) })
       .then(r => (r.ok ? r.blob() : null)).then(b => (b ? URL.createObjectURL(b) : null)).catch(() => null);
   }
   async function playLeadIn(p) {
-    if (MUTED) { console.info("[say]", LEAD_IN_TEXT); return; }
+    if (silent()) { console.info("[say]", LEAD_IN_TEXT); return; }
     const url = await Promise.race([p, sleep(1500).then(() => null)]);
     if (url) { try { await new Audio(url).play(); return; } catch { /* fall through */ } }
     playClip("calibrate_flex");
   }
   function onCalEvent(e) {
-    if (e.phase === "raised") { toast(`MVC self-corrected from your curls: ${e.mvc.map(Math.round).join(" / ")}`, 5000); return; }
+    if (e.phase === "raised") { toast(`Auto-MVC from your set: ${e.mvc.map(Math.round).join(" / ")}`, 5000); return; }
+    if (e.phase === "rest") return; // auto-rest at set start: quiet
     if (calRunning) return; // our own flow shows it
     if (e.phase === "begin") toast(`Calibration started${e.replay ? " (replay)" : ""}`);
     else if (e.phase === "captured") toast(`Calibration: captured ${e.step === "rest" ? "rest" : CH_INFO[e.ch].name}`, 2500);
@@ -447,7 +466,7 @@
   }
   if (!hookMusic()) window.addEventListener("load", hookMusic);
   // Browsers only start Web Audio after a user gesture: unlock on the first click/key.
-  const unlock = () => { if (!MUTED) try { window.LWAudio?.unlock?.(); } catch { /* ignore */ } };
+  const unlock = () => { if (!silent()) try { window.LWAudio?.unlock?.(); } catch { /* ignore */ } };
   window.addEventListener("pointerdown", unlock, { once: true });
   window.addEventListener("keydown", unlock, { once: true });
   if (window.__lwNoVoice) console.info("voice-player.js not found; using browser speech as a fallback.");

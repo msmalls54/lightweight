@@ -30,6 +30,8 @@
   .mode { font-weight: 800; letter-spacing: .1em; }
   .mode.replay { background: #3b2a00; border-color: var(--amber); color: var(--amber); }
   .grow { flex: 1; }
+  .pill.speaker { cursor: pointer; }
+  .pill.speaker.on { border-color: var(--green); color: var(--green); }
   .who { font-size: 22px; font-weight: 700; }
   .who small { color: var(--dim); font-weight: 400; font-size: 16px; }
 
@@ -120,6 +122,7 @@
   <span class="pill"><span class="dot" id="devDot"></span><span id="devText">No device</span></span>
   <span class="pill" id="hbText">Heartbeat: none</span>
   <span class="pill"><span class="dot" id="sseDot"></span><span id="sseText">Dashboard link</span></span>
+  <span class="pill" id="spk" role="button" tabindex="0">🔇 …</span>
   <span class="grow"></span>
   <span class="who" id="who">No session</span>
 </header>
@@ -154,7 +157,7 @@
     <label><input type="checkbox" id="armL" checked> L arm</label>
   </div>
   <div class="grp"><b>Calibrate</b>
-    <button id="btnCal" class="primary">Calibrate (C)</button>
+    <button id="btnCal">Calibrate (C) · optional</button>
   </div>
   <div class="grp"><b>Set</b>
     <input id="exercise" value="dumbbell curl" aria-label="Exercise">
