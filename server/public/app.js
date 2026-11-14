@@ -58,9 +58,8 @@
   // ------------------------------------------------------------ bars
   const bars = CH_INFO.map((c, i) => {
     const el = document.createElement("div");
-    el.className = `bar ${c.kind}`;
-    el.innerHTML = `<div class="val">0%</div><div class="track"><div class="mvc" style="bottom:${(100 / BAR_MAX).toFixed(1)}%"></div><div class="fill"></div></div>
-      <div class="lbl">${c.arm}<small>${c.kind === "bi" ? "biceps · target" : "front delt · cheat check"}</small></div>`;
+    el.className = `raw ${c.kind}`;
+    el.innerHTML = `<span class="lbl">${c.arm} ${c.kind === "bi" ? "biceps" : "front delt"}</span><div class="track"><div class="fill"></div><div class="mvc" style="left:${(100 / BAR_MAX).toFixed(1)}%"></div></div><span class="val">0%</span>`;
     $("bars").appendChild(el);
     return { el, val: el.querySelector(".val"), fill: el.querySelector(".fill"), i };
   });
@@ -77,16 +76,16 @@
       const p = document.createElementNS(NS, "polygon");
       p.setAttribute("points", s.points);
       const key = `${s.muscle}/${s.side}`;
-      p.setAttribute("fill", tracked.has(key) ? "#2b303b" : "#3a3f4b");
-      p.setAttribute("stroke", tracked.has(key) ? "#6b7385" : "#4a505e");
-      p.setAttribute("stroke-width", tracked.has(key) ? "0.6" : "0.3");
+      p.setAttribute("fill", tracked.has(key) ? "#252A32" : "#1A1E24");
+      p.setAttribute("stroke", tracked.has(key) ? "#3A414B" : "#22272E");
+      p.setAttribute("stroke-width", tracked.has(key) ? "0.5" : "0.3");
       if (tracked.has(key)) (mapShapes[key] ||= []).push(p);
       svg.appendChild(p);
     }
     for (const [x, t] of [[6, "R"], [94, "L"]]) {
       const tx = document.createElementNS(NS, "text");
-      tx.setAttribute("x", x); tx.setAttribute("y", 30); tx.setAttribute("fill", "#8a93a6");
-      tx.setAttribute("font-size", "9"); tx.setAttribute("font-weight", "700"); tx.setAttribute("text-anchor", "middle");
+      tx.setAttribute("x", x); tx.setAttribute("y", 30); tx.setAttribute("fill", "#8A9099");
+      tx.setAttribute("font-size", "8"); tx.setAttribute("font-weight", "600"); tx.setAttribute("text-anchor", "middle");
       tx.textContent = t; svg.appendChild(tx);
     }
     $("map").appendChild(svg);
@@ -94,7 +93,7 @@
 
   function heat(v) { // 0..1 -> dark gray to red
     const t = Math.max(0, Math.min(1, v));
-    const a = [43, 48, 59], b = [255, 45, 45];
+    const a = [37, 42, 50], b = [239, 68, 68];
     return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`;
   }
 
@@ -105,7 +104,7 @@
     const stale = performance.now() - liveAt > 1500;
     bars.forEach(b => {
       const v = live[b.i] || 0;
-      b.fill.style.height = `${Math.min(100, (v / BAR_MAX) * 100)}%`;
+      b.fill.style.width = `${Math.min(100, (v / BAR_MAX) * 100)}%`;
       b.val.textContent = pct(v);
       b.el.classList.toggle("hot", CH_INFO[b.i].kind === "delt" && v > 0.5);
       b.el.classList.toggle("stale", stale);
@@ -128,7 +127,7 @@
   function renderSetLine() {
     const n = setState.reps.size, cheat = [...setState.reps.values()].filter(Boolean).length;
     $("setline").innerHTML = currentSetId || n
-      ? `Set ${setState.set_no ?? "–"} · Rep ${n} <span class="cnt-clean">${n - cheat} clean</span> · <span class="cnt-cheat">${cheat} cheat</span>`
+      ? `Rep ${n}<span class="counts">Set ${setState.set_no ?? "–"} · <b>${n - cheat}</b> clean · <b>${cheat}</b> cheat</span>`
       : "Ready";
   }
   function addFeed(html, cls) {
@@ -155,14 +154,15 @@
     return "CLEAN";
   }
   const fmtX = m => (m >= 10 ? `${Math.round(m)}×` : `${m.toFixed(1)}×`);
+  const VERDICT_LABEL = { CLEAN: "Clean", LOOSE: "Loose", CHEAT: "Cheat" };
   const meters = {};
   for (const arm of ["R", "L"]) {
     const el = document.createElement("div");
     el.className = "meter";
-    el.innerHTML = `<div class="side">${arm === "R" ? "RIGHT" : "LEFT"}</div>
-      <div class="gauge"><div class="z zg"></div><div class="z za"></div><div class="z zr"></div><div class="mk" style="display:none"></div><div class="mv"></div><div class="learn">learning your clean rep… (2 reps)</div></div>
-      <div class="verdict">–<small>shoulder help vs your clean rep</small></div>
-      <div class="scale"><span>0×</span><span>1.2×</span><span>2×+</span></div>`;
+    el.innerHTML = `<div class="m-top"><span class="side">${arm === "R" ? "Right arm" : "Left arm"}</span><span>Shoulder help vs your clean rep</span></div>
+      <div class="verdict">–</div>
+      <div class="gauge"><div class="z zg"></div><div class="z za"></div><div class="z zr"></div><div class="mk" style="display:none"></div><div class="mv"></div><div class="learn"></div></div>
+      <div class="m-foot"><span class="msub">Learning your clean rep (2 reps)</span><span class="scale"><span>0×</span><span>1.2×</span><span>2×</span></span></div>`;
     $("meters").appendChild(el);
     meters[arm] = el;
   }
@@ -172,9 +172,8 @@
       el.classList.remove("cheat", "loose", "clean");
       el.querySelector(".mk").style.display = "none";
       el.querySelector(".mv").textContent = "";
-      el.querySelector(".learn").style.display = "";
-      el.querySelector(".learn").textContent = "learning your clean rep… (2 reps)";
-      el.querySelector(".verdict").innerHTML = `–<small>shoulder help vs your clean rep</small>`;
+      el.querySelector(".verdict").textContent = "–";
+      el.querySelector(".msub").textContent = "Learning your clean rep (2 reps)";
     }
   }
   function updateMeter(r) {
@@ -183,20 +182,16 @@
     const m = repMultiple(r), v = verdictOf(r);
     el.classList.remove("cheat", "loose", "clean");
     el.classList.add(v === "CHEAT" ? "cheat" : v === "LOOSE" ? "loose" : "clean");
-    const mk = el.querySelector(".mk"), mv = el.querySelector(".mv"), learn = el.querySelector(".learn");
+    const mk = el.querySelector(".mk"), msub = el.querySelector(".msub");
     if (m == null) {
-      mk.style.display = "none"; mv.textContent = "";
-      learn.style.display = "";
-      learn.textContent = r.cheat ? "no clean reference yet: flagged on an obvious swing" : `learning your clean rep… (rep ${r.rep} of 2)`;
+      mk.style.display = "none";
+      msub.textContent = r.cheat ? `Rep ${r.rep} · no clean reference yet, obvious swing` : `Rep ${r.rep} · learning your clean rep (${Math.min(r.rep, 2)} of 2)`;
     } else {
-      learn.style.display = "none";
       const x = Math.min(m, METER_MAX) / METER_MAX * 100;
       mk.style.display = ""; mk.style.left = `${Math.max(1, Math.min(99, x))}%`;
-      mv.textContent = fmtX(m);
-      mv.style.left = x > 70 ? "" : `calc(${x}% + 10px)`;
-      mv.style.right = x > 70 ? `calc(${100 - x}% + 10px)` : "";
+      msub.textContent = `Rep ${r.rep}`;
     }
-    el.querySelector(".verdict").innerHTML = `${v}<small>rep ${r.rep}${m != null ? ` · ${fmtX(m)} shoulder` : ""}</small>`;
+    el.querySelector(".verdict").innerHTML = `${VERDICT_LABEL[v]}${m != null ? `<span class="mx">${fmtX(m)}</span>` : ""}`;
   }
   function pulseMap(r) {
     const side = r.arm === "L" ? "left" : "right";
@@ -215,22 +210,21 @@
     const d = e.detail;
     if (!d) return;
     const dec = d.decision ? `${esc(d.decision.next.replace(/_/g, " "))}${d.decision.reason ? `: ${esc(d.decision.reason)}` : ""}` : "";
-    addFeed(`<span class="t">Set ${e.set_no ?? ""} report</span><span class="tag src">${esc(d.source || "")}</span>
-      <div class="rep-body"><div class="rep-head">${esc(d.headline || "")}</div>
+    $("report").innerHTML = `<div class="r-head"><span>Set ${e.set_no ?? ""} report · ${esc(d.headline || "")}</span><span class="src">${esc(d.source || "")}</span></div>
       <ul>${(d.bullets || []).map(b => `<li>${esc(b)}</li>`).join("")}</ul>
-      ${d.cue ? `<div class="rep-cue">Cue: ${esc(d.cue)}</div>` : ""}
-      ${dec ? `<div class="rep-dec">Decision: ${dec}</div>` : ""}</div>`, "report");
+      ${d.cue ? `<div class="r-cue"><b>Cue</b>${esc(d.cue)}</div>` : ""}
+      ${dec ? `<div class="r-dec"><b>Decision</b>${dec}</div>` : ""}`;
   }
 
   function repHtml(r) {
     const armName = r.arm === "L" ? "Left" : "Right";
     const bi = r.arm === "L" ? 2 : 0, de = bi + 1;
     const v = verdictOf(r), m = repMultiple(r);
-    const why = v === "CHEAT" ? (r.cheat_reason === "delt_peak" ? "CHEAT · delt spike" : "CHEAT") : v;
+    const cls = v.toLowerCase();
     const bal = r.r_share != null ? ` · R/L ${Math.round(r.r_share * 100)}/${Math.round((1 - r.r_share) * 100)}` : "";
     const base = r.baseline_delt_share != null ? ` (base ${pct(r.baseline_delt_share)})` : "";
-    return `<span class="t">${r.set_no ? `Set ${r.set_no} · ` : ""}Rep ${r.rep} · ${armName}${m != null ? ` · ${fmtX(m)} shoulder` : ""}</span><span class="tag${v === "LOOSE" ? " loose" : ""}">${why}</span>
-      <span class="d">delt share ${pct(r.delt_share)}${base} · biceps peak ${pct(r.peak_pct[bi])} · delt peak ${pct(r.peak_pct[de])}${bal}</span>`;
+    return `<span class="v ${cls}"></span><span class="t">Rep ${r.rep} <span class="arm">· ${armName}</span></span><span class="x" title="shoulder help vs your clean rep">${m != null ? fmtX(m) : ""}</span><span class="w ${cls}">${VERDICT_LABEL[v]}${r.cheat && r.cheat_reason === "delt_peak" ? " · spike" : ""}</span>
+      <span class="d">Delt share ${pct(r.delt_share)}${base} · biceps peak ${pct(r.peak_pct[bi])} · delt peak ${pct(r.peak_pct[de])}${bal}</span>`;
   }
   let bannerTimer;
   function banner(text) {
@@ -245,7 +239,7 @@
     setState.set_no = r.set_no ?? setState.set_no;
     setState.reps.set(r.rep, !!(setState.reps.get(r.rep) || r.cheat));
     renderSetLine();
-    addFeed(repHtml(r), r.cheat ? "cheat" : verdictOf(r) === "LOOSE" ? "loose" : "");
+    addFeed(repHtml(r), "");
     updateMeter(r);
     if (!fresh) return;
     pulseMap(r);
@@ -253,8 +247,8 @@
     const cheatArms = new Set(prev?.cheatArms ?? []);
     if (r.cheat) cheatArms.add(r.arm);
     if (r.cheat) {
-      const arm = activeArms.length < 2 ? "" : cheatArms.size > 1 ? " (BOTH ARMS)" : ` (${r.arm === "L" ? "LEFT" : "RIGHT"})`;
-      banner(`${r.set_no ? `SET ${r.set_no} · ` : ""}REP ${r.rep}${arm}: DELT TOOK OVER`);
+      const arm = activeArms.length < 2 ? "" : cheatArms.size > 1 ? " · both arms" : ` · ${r.arm === "L" ? "left" : "right"} arm`;
+      banner(`Rep ${r.rep}${arm}: the front delt took over`);
     }
     // One call-out per rep number: the other arm's event only speaks if it upgrades clean -> cheat.
     if (!prev || (r.cheat && !prev.cheat)) playClip(r.cue);
@@ -263,18 +257,17 @@
   }
   function onSetEnd(e) {
     if (e.too_short) {
-      addFeed(`<span class="t">Set ${e.set_no ?? ""} done</span><span class="tag" style="color:var(--dim)">${e.n_reps} rep${e.n_reps === 1 ? "" : "s"}</span>
-        <span class="d">Set too short for a summary (under 3 reps)</span>`, "setend");
+      addFeed(`<span class="v none"></span><span class="t">Set ${e.set_no ?? ""} done · ${e.n_reps} rep${e.n_reps === 1 ? "" : "s"}</span><span class="x"></span><span class="w none">Too short</span>`, "setend");
       currentSetId = null;
       $("coach").textContent = `Set too short (${e.n_reps} rep${e.n_reps === 1 ? "" : "s"}): no summary.`;
       return;
     }
     playClip(e.cue);
     const total = e.clean + e.cheats;
-    addFeed(`<span class="t">Set ${e.set_no ?? ""} done</span><span class="tag" style="color:var(--blue)">${total} reps</span>
-      <span class="d">${e.clean} clean · ${e.cheats} cheat${e.first_cheat_rep ? ` · first cheat rep ${e.first_cheat_rep}` : ""} · next: ${esc(e.decision?.next ?? "")}</span>`, "setend");
+    addFeed(`<span class="v none"></span><span class="t">Set ${e.set_no ?? ""} done · ${total} reps · ${e.clean} clean, ${e.cheats} cheat</span><span class="x"></span><span class="w none">${e.first_cheat_rep ? `First cheat rep ${e.first_cheat_rep}` : ""}</span>`, "setend");
     currentSetId = null;
     $("coach").textContent = "Coach is thinking…";
+    $("report").innerHTML = "";
   }
 
   // ------------------------------------------------------------ status
@@ -292,17 +285,18 @@
   }
   function clearStale() { if (staleId) { staleId = null; renderSetLine(); } }
   function renderIdle() {
-    $("who").innerHTML = `No session <small>press New session</small>`;
-    $("setline").innerHTML = `Ready <span class="idle-note">· press New session (Mike) or Walk-up</span>`;
-    $("setmeta").textContent = "Then Start set (S) and curl. Calibrate (C) is optional.";
-    $("armState").className = "armstate idle"; $("armState").textContent = "IDLE";
+    $("who").textContent = "No session";
+    $("setline").innerHTML = "Ready";
+    $("setmeta").textContent = "Start a new session (or a walk-up), then start a set.";
+    $("armState").className = "idle"; $("armState").textContent = "Idle";
+    $("heroStart").classList.remove("show");
     $("coach").textContent = "";
   }
   // Both arms' MVCs, so an imbalance like 5k vs 15k is visible (each %MVC is relative to its own MVC).
   function mvcText(mvc) {
     if (!mvc) return " · MVC default";
     const k = x => `${(x / 1000).toFixed(1)}k`;
-    const lop = (a, b) => Math.max(a, b) / Math.max(1, Math.min(a, b)) > 1.5 ? " ⚠" : "";
+    const lop = (a, b) => Math.max(a, b) / Math.max(1, Math.min(a, b)) > 1.5 ? " (uneven)" : "";
     return ` · MVC biceps R ${k(mvc[0])} / L ${k(mvc[2])}${lop(mvc[0], mvc[2])} · delt R ${k(mvc[1])} / L ${k(mvc[3])}${lop(mvc[1], mvc[3])}`;
   }
   function onStatus(s) {
@@ -315,11 +309,11 @@
     if (staleId && (s.mode !== "live" || s.session?.id !== staleId)) clearStale();
     const d = s.device;
     $("devDot").className = `dot ${d.streaming ? "on" : d.last_batch_age_ms == null ? "" : "off"}`;
-    $("devText").textContent = d.streaming ? `Device streaming · ${d.batches_per_s.toFixed(1)} batches/s` : d.last_batch_age_ms == null ? "No device yet" : `Device silent · last ${ago(d.last_batch_age_ms)}`;
+    $("devText").textContent = d.streaming ? `Streaming · ${d.batches_per_s.toFixed(1)}/s` : d.last_batch_age_ms == null ? "No device" : `Silent · ${ago(d.last_batch_age_ms)}`;
     const hb = d.heartbeat;
-    $("hbText").textContent = hb ? `Heartbeat ${ago(hb.age_ms)} · RSSI ${hb.rssi ?? "?"} · queue ${hb.queue ?? "?"}` : "Heartbeat: none";
+    $("hbText").textContent = hb ? `RSSI ${hb.rssi ?? "?"}${hb.queue ? ` · queue ${hb.queue}` : ""}${hb.age_ms > 5000 ? ` · heartbeat ${ago(hb.age_ms)}` : ""}` : "No heartbeat";
     const m = $("mode");
-    m.textContent = s.mode === "replay" ? `REPLAY ${s.replay ? `${Math.round((s.replay.i / s.replay.n) * 100)}%` : ""}` : "LIVE";
+    m.textContent = s.mode === "replay" ? `Replay ${s.replay ? `${Math.round((s.replay.i / s.replay.n) * 100)}%` : ""}` : "Live";
     m.classList.toggle("replay", s.mode === "replay");
     const ss = s.session;
     if (staleId) {
@@ -330,26 +324,30 @@
     }
     if (ss) {
       activeArms = s.set?.arms ?? ss.arms;
-      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "calibrating…" : `calibration: ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "calibrated" : "auto"}${ss.cal_problems?.length ? " ⚠" : ""}${mvcText(ss.mvc)}`}</small>`;
+      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "Calibrating…" : `Calibration ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "done" : "auto"}${ss.cal_problems?.length ? " (check)" : ""}${mvcText(ss.mvc)}`}</small>`;
     } else $("who").textContent = "No session";
     const armed = !!s.set && !ss?.calibrating;
-    if (s.countdown_ms_left != null) { $("armState").className = "armstate armed"; $("armState").textContent = "COUNTDOWN · pick them up"; }
+    if (s.countdown_ms_left != null) { $("armState").className = "armed"; $("armState").textContent = "Countdown · pick them up"; }
     else if (!loopTimer) {
-      $("armState").className = `armstate ${armed ? "armed" : "idle"}`;
-      $("armState").textContent = armed ? (s.set.set_no ? `● SET ${s.set.set_no} RUNNING` : "● ARMED · curl to start") : ss?.calibrating ? "CALIBRATING" : "IDLE · press Start set (S / Space)";
+      $("armState").className = armed ? "armed" : "idle";
+      $("armState").textContent = armed ? (s.set.set_no ? `Set ${s.set.set_no} running` : "Armed · curl to start") : ss?.calibrating ? "Calibrating" : "Idle";
     }
+    $("heroStart").classList.toggle("show", !armed && s.countdown_ms_left == null && !ss?.calibrating && s.mode === "live" && !loopTimer);
     if (s.set) {
-      $("setmeta").textContent = `${s.set.exercise} · ${s.set.variant}${s.set.load_lb != null ? ` · ${s.set.load_lb} lb` : ""} · ${s.set.arms.join("+")} · set armed${s.set.set_no ? ` (#${s.set.set_no})` : ", waiting for first rep"}`;
-    } else $("setmeta").textContent = ss?.calibrating ? "Calibrating…" : "No set armed. Press Start set.";
+      $("setmeta").textContent = `${s.set.exercise} · ${s.set.variant}${s.set.load_lb != null ? ` · ${s.set.load_lb} lb` : ""} · ${s.set.arms.join(" + ")}`;
+    } else $("setmeta").textContent = ss?.calibrating ? "Calibrating…" : "Pick up the weights after the countdown.";
     $("btnReplayStop").disabled = s.mode !== "replay";
     $("btnReplay").disabled = s.mode === "replay";
   }
 
   function renderSpeaker(hasSpeaker) {
     const el = $("spk");
-    if (MUTED) { el.textContent = "🔇 Muted tab"; el.title = "Opened with ?mute=1: never plays voice"; el.className = "pill"; return; }
-    el.textContent = isSpeaker ? "🔊 This tab speaks" : hasSpeaker ? "🔇 Text only · click to speak here" : "🔇 No speaker";
-    el.className = `pill speaker${isSpeaker ? " on" : ""}`;
+    const on = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2l3-2.5v9L4.5 10h-2z"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6.5 6.5 0 0 1 0 9"/></svg>';
+    const off = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2l3-2.5v9L4.5 10h-2z"/><path d="M11 6l3.5 4M14.5 6L11 10"/></svg>';
+    if (MUTED) { el.innerHTML = `${off}Muted`; el.title = "Opened with ?mute=1: never plays voice"; el.className = ""; return; }
+    el.innerHTML = isSpeaker ? `${on}This tab speaks` : `${off}${hasSpeaker ? "Text only · click to speak here" : "No speaker"}`;
+    el.title = isSpeaker ? "Voice plays on this tab" : "Click to play the voice on this tab";
+    el.className = isSpeaker ? "on" : "";
   }
   $("spk").onclick = run(async () => {
     if (MUTED || isSpeaker || !clientId) return;
@@ -393,9 +391,9 @@
     const tick = () => {
       const left = endsAt - Date.now();
       const t = $("cdText");
-      if (left > 3000) { t.textContent = "PICK THEM UP"; t.className = ""; $("cdSub").textContent = "Set starts on CURL. Weights up now."; }
-      else if (left > 0) { t.textContent = String(Math.ceil(left / 1000)); t.className = ""; $("cdSub").textContent = "Get ready…"; }
-      else { t.textContent = "CURL!"; t.className = "go"; $("cdSub").textContent = ""; }
+      if (left > 3000) { t.textContent = "Pick them up"; t.className = ""; $("cdSub").textContent = "The set starts on curl."; }
+      else if (left > 0) { t.textContent = String(Math.ceil(left / 1000)); t.className = ""; $("cdSub").textContent = "Get ready"; }
+      else { t.textContent = "Curl"; t.className = "go"; $("cdSub").textContent = ""; }
     };
     tick();
     cdTimer = setInterval(tick, 100);
@@ -426,8 +424,8 @@
     clearInterval(loopTimer);
     loopTimer = setInterval(() => {
       const left = loopEndsAt - Date.now();
-      $("armState").className = "armstate idle";
-      $("armState").textContent = `NEXT SET IN ${Math.max(0, Math.ceil(left / 1000))} s · any key cancels`;
+      $("armState").className = "idle";
+      $("armState").textContent = `Next set in ${Math.max(0, Math.ceil(left / 1000))} s · any key cancels`;
       if (left <= 0) { cancelLoop(); startSet(); }
     }, 250);
   }
@@ -450,8 +448,8 @@
   let es;
   function connect() {
     es = new EventSource(MUTED ? "/events?mute=1" : "/events");
-    es.onopen = () => { $("sseDot").className = "dot on"; $("sseText").textContent = "Dashboard linked"; };
-    es.onerror = () => { $("sseDot").className = "dot off"; $("sseText").textContent = "Server link lost, retrying"; };
+    es.onopen = () => { $("sseDot").className = "dot on"; $("sseText").textContent = "Linked"; $("sseWrap").classList.add("ok"); };
+    es.onerror = () => { $("sseDot").className = "dot off"; $("sseText").textContent = "Server link lost, retrying"; $("sseWrap").classList.remove("ok"); };
     es.onmessage = ev => {
       let e; try { e = JSON.parse(ev.data); } catch { return; }
       switch (e.type) {
@@ -484,7 +482,7 @@
         case "calibrate_request": calibrate(); break;
         case "session":
           clearStale();
-          $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); $("coach").textContent = ""; resetMeters();
+          $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); $("coach").textContent = ""; $("report").innerHTML = ""; resetMeters();
           toast(`New session: ${e.person}${e.walkup ? " (walk-up)" : ""}`);
           break;
         case "replay":
@@ -515,25 +513,25 @@
       const { arms } = await post("/calibrate/begin");
       const steps = [];
       for (const a of ["R", "L"]) if (arms.includes(a)) {
-        const side = a === "R" ? "RIGHT" : "LEFT", base = a === "R" ? 0 : 2;
-        steps.push({ ch: base, title: `${side} BICEPS`, hint: "Curl up and squeeze as hard as you can. Hold." });
-        steps.push({ ch: base + 1, title: `${side} FRONT DELT`, hint: "Front raise, straight arm, and hold it up." });
+        const side = a === "R" ? "Right" : "Left", base = a === "R" ? 0 : 2;
+        steps.push({ ch: base, title: `${side} biceps`, hint: "Curl up and squeeze as hard as you can. Hold." });
+        steps.push({ ch: base + 1, title: `${side} front delt`, hint: "Front raise, straight arm, and hold it up." });
       }
       const total = steps.length + 1;
       const lines = []; // per-channel captured MVC, shown under the countdown
       const showLines = () => { $("calResult").innerHTML = lines.join("<br>"); };
       const leadIn = preloadLeadIn(); // "Three. Two. One. Squeeze!" fetched once, during the relax step
-      calShow(`Step 1 / ${total}`, "RELAX", "Arms down, loose. Don't move.");
+      calShow(`Step 1 of ${total}`, "Relax", "Arms down, loose. Don't move.");
       playClip("calibrate_relax");
       await countdown(3);
       await post("/calibrate/capture", { step: "rest", window_ms: 2500 });
       for (let i = 0; i < steps.length; i++) {
         const s = steps[i];
         for (let attempt = 1; ; attempt++) {
-          calShow(`Step ${i + 2} / ${total} · get ready${attempt > 1 ? ` · try ${attempt}` : ""}`, s.title, s.hint);
+          calShow(`Step ${i + 2} of ${total} · get ready${attempt > 1 ? ` · try ${attempt}` : ""}`, s.title, s.hint);
           await playLeadIn(leadIn);
           for (const n of [3, 2, 1]) { if (calAbort) throw new Error("cancelled"); $("calCount").textContent = n; await sleep(800); }
-          calShow(`Step ${i + 2} / ${total}`, `SQUEEZE! ${s.title}`, s.hint, true);
+          calShow(`Step ${i + 2} of ${total}`, `Squeeze · ${s.title.toLowerCase()}`, s.hint, true);
           await countdown(4); // hold 4 s; the server keeps the last 3.5 s
           const r = await post("/calibrate/capture", { step: "mvc", ch: s.ch, window_ms: 3500 });
           const mvc = r.level?.[0] ?? 0, isBi = s.ch % 2 === 0;
@@ -543,13 +541,13 @@
             await sleep(1500);
             continue;
           }
-          lines.push(weak ? `<span class="bad">${CH_INFO[s.ch].name}: MVC ${Math.round(mvc).toLocaleString()} ⚠ still low (pad or gain?)</span>`
-            : `<span class="good">${CH_INFO[s.ch].name}: MVC ${Math.round(mvc).toLocaleString()} ✓</span>`);
+          lines.push(weak ? `<span class="bad">${CH_INFO[s.ch].name}: MVC ${Math.round(mvc).toLocaleString()}, still low (pad or gain?)</span>`
+            : `<span class="good">${CH_INFO[s.ch].name}: MVC ${Math.round(mvc).toLocaleString()}</span>`);
           showLines();
           break;
         }
       }
-      calShow("Done", "CALIBRATED", "");
+      calShow("Done", "Calibrated", "");
       const { calibration: c } = await post("/calibrate");
       const weakBi = [0, 2].filter(i => arms.includes(i === 0 ? "R" : "L") && c.mvc[i] < MIN_BICEPS_MVC);
       const warn = [...(c.problems ?? []), ...weakBi.map(i => `${CH_INFO[i].name} MVC ${Math.round(c.mvc[i])} < ${MIN_BICEPS_MVC}: flex harder, recalibrate (C)`)];
@@ -557,7 +555,7 @@
         `<div style="font-size:22px">${CH_INFO.map((ch, i) => `${ch.name} <b>${Math.round(c.mvc[i]).toLocaleString()}</b>`).join(" · ")}</div>` +
         (warn.length ? `<div class="bad">${warn.map(esc).join("<br>")}</div>` : `<div class="good">All channels look good.</div>`) +
         `<div style="color:var(--dim);font-size:16px">rest ${c.rest.map(Math.round).join(" / ")} · MVC self-corrects upward from your real curls after each set</div>`;
-      $("calTitle").textContent = warn.length ? "CALIBRATED ⚠" : "CALIBRATED ✓";
+      $("calTitle").textContent = warn.length ? "Calibrated, with warnings" : "Calibrated";
       c.problems = warn;
       $("calCancel").style.display = "none"; $("calClose").style.display = "";
       if (!c.problems?.length) setTimeout(() => { if (!calRunning) $("cal").classList.remove("show"); }, 2500);
@@ -586,7 +584,7 @@
     if (calRunning) return; // our own flow shows it
     if (e.phase === "begin") toast(`Calibration started${e.replay ? " (replay)" : ""}`);
     else if (e.phase === "captured") toast(`Calibration: captured ${e.step === "rest" ? "rest" : CH_INFO[e.ch].name}`, 2500);
-    else if (e.phase === "done") toast(e.problems?.length ? `Calibrated with warnings: ${e.problems.join("; ")}` : "Calibrated ✓", 5000);
+    else if (e.phase === "done") toast(e.problems?.length ? `Calibrated with warnings: ${e.problems.join("; ")}` : "Calibrated", 5000);
   }
   $("calCancel").onclick = () => { calAbort = true; };
   $("calClose").onclick = () => $("cal").classList.remove("show");
@@ -608,6 +606,7 @@
   const stopSet = run(() => { cancelLoop(); return post("/set/stop"); });
   $("cdCancel").onclick = stopSet;
   $("btnStart").onclick = startSet;
+  $("heroStart").onclick = startSet;
   $("btnStop").onclick = stopSet;
   $("btnReplay").onclick = run(async () => {
     const id = $("replaySel").value;
