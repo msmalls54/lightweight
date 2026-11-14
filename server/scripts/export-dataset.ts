@@ -408,11 +408,16 @@ function setPrompt(meta: RecordingMeta, setIndex: number, set: SetEndEvent): str
 
 const cueText = (keys: string[]) => keys.map((k) => CLIPS[k] ?? k).join(" ");
 
-interface Out { reps: object[]; windows: object[]; sft: object[] }
+interface Out { reps: object[]; windows: object[]; sft: object[]; sets: object[] }
 
 function emit(runs: SetRun[], out: Out) {
   for (const run of runs) {
     const m = run.meta;
+    out.sets.push({
+      id: `${m.recording_id}/set${run.set_index}`, recording_id: m.recording_id, source: m.source, person: m.person, session_id: m.session_id,
+      exercise: m.exercise, variant: m.variant, load_lb: m.load_lb, load_desc: m.load_desc, arms_on: m.arms_on, set_index: run.set_index,
+      labels: run.set.reps.map((r) => labelFor(run, r).label), set_end: run.set,
+    });
     for (const r of run.set.reps) {
       const id = `${m.recording_id}/set${run.set_index}/rep${r.rep}-${r.arm}`;
       const lab = labelFor(run, r);
@@ -434,6 +439,7 @@ function emit(runs: SetRun[], out: Out) {
         up_delt_ratio: r.up_delt_ratio ?? null, baseline_up_delt_ratio: r.baseline_up_delt_ratio ?? null,
         r_share: r.r_share,
         had_rep_event: run.repEventKeys.has(repKey(r)),
+        loose: r.loose ?? false,
         sample_hz: m.sample_hz, calibration: { rest: m.calibration.rest, mvc: m.calibration.mvc },
       });
       const w = window128(run.samples, r.start_ms, r.end_ms);
@@ -474,6 +480,7 @@ function emit(runs: SetRun[], out: Out) {
 const HUMAN_LABELS: Record<string, Record<number, { swing?: number[]; loose?: number[]; rest: Instructed; note: string }>> = {
   "s-1114-122526-r82": { 1: { swing: [4, 8], loose: [5], rest: "strict", note: "Mike: reps 4 and 8 were intended swings, rep 5 'kind of activated, going fast', the rest strict" } },
   "s-1114-123449-zdw": { 1: { rest: "strict", note: "Mike: 3 strict reps" } },
+  "s-1114-140601-kau": { 1: { rest: "strict", note: "Mike: all 9 reps intended clean (live run 4)" } },
 };
 
 interface StoredRep { rep: number; start_ms: number; end_ms: number; set_no: number }
@@ -506,7 +513,7 @@ function runLive(dbPath: string): SetRun[] {
     const person = s.is_walkup ? `walkup-${++walkup}` : s.person.toLowerCase();
     const human = HUMAN_LABELS[s.session_id] ?? {};
     // Same engine settings as the live server: 30 s auto-end; everything else = current defaults.
-    const e = new Engine({ autoEndMs: 30_000 });
+    const e = new Engine({ autoEndMs: 8_000, mvcPercentile: 0.99 }); // = server ENGINE_CONFIG (src/pipeline.ts)
     e.setCalibration(cal);
     const clock = { lastT: -Infinity };
     let setNo = 0;
@@ -592,7 +599,7 @@ async function main() {
   const live = DB_PATH ? runLive(DB_PATH) : [];
   const syn = WITH_SYNTH ? runSynthetic() : [];
 
-  const out: Out = { reps: [], windows: [], sft: [] };
+  const out: Out = { reps: [], windows: [], sft: [], sets: [] };
   emit(real, out);
   emit(live, out);
   emit(syn, out);
@@ -607,6 +614,7 @@ async function main() {
   writeFileSync(path.join(OUT, "reps.jsonl"), jsonl(out.reps));
   writeFileSync(path.join(OUT, "windows.jsonl"), jsonl(out.windows));
   writeFileSync(path.join(OUT, "gemma_sft.jsonl"), jsonl(out.sft));
+  writeFileSync(path.join(OUT, "sets.jsonl"), jsonl(out.sets));
 
   // Console summary for the sanity check (counts per recording/set vs the engine-real tests).
   console.log(`wrote ${OUT}`);
