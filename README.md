@@ -9,7 +9,7 @@ Demo video: _TODO: link_
 
 ## What it does
 
-- **Feels the lift.** Four MyoWare 2.0 EMG sensors read the left and right **biceps** (the target) and the left and right **front delts** (the "snitch") at 200 Hz.
+- **Feels the lift.** Four MyoWare 2.0 EMG sensors read the left and right **biceps** (the target) and the left and right **front delts** (the cheat check) at 200 Hz.
 - **Catches the swing.** When you swing a curl up, your front delt starts the weight. The signal engine compares each rep's up phase with your own clean reps and flags the cheat ("delt took over").
 - **Calls it out loud.** A voice coach (Gemini TTS, voice *Alnilam*) says "Rep six. Your delt took over." over your music, ducking the music while it talks. Call-outs are pre-generated clips, so there's no waiting on an API mid-set.
 - **Knows you.** A coach brain (**Gemini 4 Hydrogen**) gets one context packet: your profile, your plan (35 lb stays 35 lb; progress means more clean reps), today's sets and your last session. After each set it gives a one or two sentence summary.
