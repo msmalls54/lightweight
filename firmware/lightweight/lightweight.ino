@@ -193,10 +193,13 @@ static void emitIngest(Out &o, uint32_t b0, uint8_t k) {
   o.str("]}");
 }
 
-static void emitHeartbeat(Out &o, uint32_t, uint8_t) {
-  uint32_t done = completeBatches();
+// emit runs twice (dry count, then send), so every value must be fixed before the first pass:
+// a = uptime snapshot, hbDone = completed-batch snapshot (set by the caller).
+static uint32_t hbDone = 0;
+static void emitHeartbeat(Out &o, uint32_t uptime, uint8_t) {
+  uint32_t done = hbDone;
   o.str("{\"device\":\"" DEVICE_ID "\",\"seq\":"); o.u(seqBase + (done ? done - 1 : 0));
-  o.str(",\"uptime_ms\":"); o.u(millis());
+  o.str(",\"uptime_ms\":"); o.u(uptime);
   o.str(",\"rssi\":"); o.i(lastRssi);
   o.str(",\"queue\":"); o.u(done - nextSend);
   o.str(",\"fw\":\"" FW_VERSION "\",\"dropped\":"); o.u(droppedBatches);
@@ -416,7 +419,8 @@ void loop() {
     lastHeartbeatMs = now;
     lastRssi = WiFi.RSSI();
     uint32_t rtt = 0;
-    int st = httpPost("/heartbeat", emitHeartbeat, 0, 0, false, rtt);
+    hbDone = completeBatches();
+    int st = httpPost("/heartbeat", emitHeartbeat, millis(), 0, false, rtt);
     if (st != 200) { netFailed(st); return; }
     heartbeatsOk++;
     backoffMs = 250;
