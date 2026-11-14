@@ -336,7 +336,7 @@ export function fallbackSummary(set: SetEndEvent): string {
   const decision = decisionShort(set.decision?.next);
   if (f.total_reps === 0) return `No reps counted. ${decision}`;
   if (f.reference_status === "learning" && f.cheats === 0)
-    return `${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in. Still learning your clean rep, so no calls yet. Keep them strict.`;
+    return `Still learning your clean rep, so no calls yet. ${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in, keep them strict.`;
   if (f.cheats === 0) return `All ${f.total_reps} reps clean, shoulder in its normal range. ${cleanSetCue(f)} ${decision}`;
   const cheatsF = f.reps.filter((r) => r.verdict === "cheat");
   if (f.cheat_pattern.startsWith("fatigue") && cheatsF.length >= 3) {

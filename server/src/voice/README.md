@@ -30,7 +30,8 @@ void initVoice({ apiKey: loadGeminiKey() ?? "", cacheDir: DEFAULT_VOICE_CACHE })
 //   card = await summarizeSetDetail(ctx, set)
 // session end (Mike only): writeTodayHistory(todaySets, { person, setMeta })
 ```
-- Spoken summary is capped at 25 words (~8 s). Longer model output is trimmed to whole sentences or replaced by the code line.
+- Summary text is capped at 25 words (shown on screen); only `spokenPart(line)` (first sentence, <= 15 words) is spoken. Pre-TTS exactly that: `speak(spokenPart(line))`, and send it as `spoken` in coach_audio.
+- Live TTS (`speak`, `/voice/say`) tries `SAY_TTS_MODELS` (flash-tts first, 8 s per model); clips keep `TTS_MODEL`.
 - `speak()` dedups concurrent requests for the same text, so the server's pre-TTS and the speaker tab's `/voice/say` share one Gemini call.
 - `pickCue(rep)` returns one key (BUILD.md contract); `pickCueSequence` stitches the rep number in front of a flag.
 - Cache lives in `server/.cache/voice/` (gitignored) + `clips.json` manifest; a clip regenerates only if its text or
