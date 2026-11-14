@@ -1,0 +1,262 @@
+{
+ "_note": "Real live set Nov 14 15:20 (read-only export). Rep 4: left-shoulder cheat at ~1.2x, rushed (205 ms up). The coach said '1 time normal'.",
+ "set_no": 1,
+ "ctx": {
+  "session_id": "s-1114-151942-af0",
+  "set_id": "set-1114-152057-jr0",
+  "person": "Mike",
+  "exercise": "dumbbell curl",
+  "variant": "standing",
+  "load_lb": 35,
+  "arms": [
+   "R",
+   "L"
+  ]
+ },
+ "set_end": {
+  "type": "set_end",
+  "set_id": "set-1114-152057-jr0",
+  "reps": [
+   {
+    "type": "rep",
+    "set_id": "set-1114-152057-jr0",
+    "arm": "R",
+    "rep": 1,
+    "start_ms": 2316135,
+    "end_ms": 2318605,
+    "peak_pct": [
+     0.999,
+     0.896,
+     1.001,
+     0.697
+    ],
+    "mean_pct": [
+     0.63,
+     0.596,
+     0.78,
+     0.382
+    ],
+    "delt_share": 0.486,
+    "baseline_delt_share": null,
+    "up_delt_ratio": 1.188,
+    "baseline_up_delt_ratio": null,
+    "cheat": false,
+    "cheat_reason": null,
+    "r_share": 0.447,
+    "up_ms": 820,
+    "down_ms": 745,
+    "loose": false,
+    "arm_detail": {
+     "R": {
+      "verdict": "clean",
+      "cheat_reason": null,
+      "delt_share": 0.486,
+      "up_delt_ratio": 1.188,
+      "delt_peak": 0.896,
+      "delt_sat_ms": 0,
+      "ref_delt_share": null,
+      "ref_up_delt_ratio": null,
+      "ref_delt_peak": null
+     },
+     "L": {
+      "verdict": "clean",
+      "cheat_reason": null,
+      "delt_share": 0.329,
+      "up_delt_ratio": 0.902,
+      "delt_peak": 0.697,
+      "delt_sat_ms": 0,
+      "ref_delt_share": null,
+      "ref_up_delt_ratio": null,
+      "ref_delt_peak": null
+     }
+    }
+   },
+   {
+    "type": "rep",
+    "set_id": "set-1114-152057-jr0",
+    "arm": "R",
+    "rep": 2,
+    "start_ms": 2320695,
+    "end_ms": 2323155,
+    "peak_pct": [
+     0.999,
+     0.933,
+     1.001,
+     0.682
+    ],
+    "mean_pct": [
+     0.643,
+     0.6,
+     0.777,
+     0.38
+    ],
+    "delt_share": 0.483,
+    "baseline_delt_share": null,
+    "up_delt_ratio": 1.249,
+    "baseline_up_delt_ratio": null,
+    "cheat": false,
+    "cheat_reason": null,
+    "r_share": 0.453,
+    "up_ms": 1040,
+    "down_ms": 800,
+    "loose": false,
+    "arm_detail": {
+     "R": {
+      "verdict": "clean",
+      "cheat_reason": null,
+      "delt_share": 0.483,
+      "up_delt_ratio": 1.249,
+      "delt_peak": 0.933,
+      "delt_sat_ms": 0,
+      "ref_delt_share": null,
+      "ref_up_delt_ratio": null,
+      "ref_delt_peak": null
+     },
+     "L": {
+      "verdict": "clean",
+      "cheat_reason": null,
+      "delt_share": 0.329,
+      "up_delt_ratio": 0.825,
+      "delt_peak": 0.682,
+      "delt_sat_ms": 0,
+      "ref_delt_share": null,
+      "ref_up_delt_ratio": null,
+      "ref_delt_peak": null
+     }
+    }
+   },
+   {
+    "type": "rep",
+    "set_id": "set-1114-152057-jr0",
+    "arm": "R",
+    "rep": 3,
+    "start_ms": 2326325,
+    "end_ms": 2328590,
+    "peak_pct": [
+     0.999,
+     0.914,
+     1.001,
+     0.635
+    ],
+    "mean_pct": [
+     0.655,
+     0.577,
+     0.806,
+     0.355
+    ],
+    "delt_share": 0.468,
+    "baseline_delt_share": null,
+    "up_delt_ratio": 1.058,
+    "baseline_up_delt_ratio": null,
+    "cheat": false,
+    "cheat_reason": null,
+    "r_share": 0.448,
+    "up_ms": 825,
+    "down_ms": 820,
+    "loose": false,
+    "arm_detail": {
+     "R": {
+      "verdict": "clean",
+      "cheat_reason": null,
+      "delt_share": 0.468,
+      "up_delt_ratio": 1.058,
+      "delt_peak": 0.914,
+      "delt_sat_ms": 0,
+      "ref_delt_share": null,
+      "ref_up_delt_ratio": null,
+      "ref_delt_peak": null
+     },
+     "L": {
+      "verdict": "clean",
+      "cheat_reason": null,
+      "delt_share": 0.306,
+      "up_delt_ratio": 0.857,
+      "delt_peak": 0.635,
+      "delt_sat_ms": 0,
+      "ref_delt_share": 0.329,
+      "ref_up_delt_ratio": 0.902,
+      "ref_delt_peak": 0.697
+     }
+    }
+   },
+   {
+    "type": "rep",
+    "set_id": "set-1114-152057-jr0",
+    "arm": "L",
+    "rep": 4,
+    "start_ms": 2334785,
+    "end_ms": 2336585,
+    "peak_pct": [
+     0.998,
+     1,
+     1.001,
+     1.102
+    ],
+    "mean_pct": [
+     0.657,
+     0.888,
+     0.804,
+     0.666
+    ],
+    "delt_share": 0.453,
+    "baseline_delt_share": 0.329,
+    "up_delt_ratio": 1.116,
+    "baseline_up_delt_ratio": 0.902,
+    "cheat": true,
+    "cheat_reason": "delt_share_jump",
+    "r_share": 0.45,
+    "up_ms": 205,
+    "down_ms": 360,
+    "loose": false,
+    "arm_detail": {
+     "R": {
+      "verdict": "clean",
+      "cheat_reason": null,
+      "delt_share": 0.575,
+      "up_delt_ratio": 1.351,
+      "delt_peak": 1,
+      "delt_sat_ms": 885,
+      "ref_delt_share": 0.486,
+      "ref_up_delt_ratio": 1.188,
+      "ref_delt_peak": 0.914
+     },
+     "L": {
+      "verdict": "cheat",
+      "cheat_reason": "delt_share_jump",
+      "delt_share": 0.453,
+      "up_delt_ratio": 1.116,
+      "delt_peak": 1.102,
+      "delt_sat_ms": 180,
+      "ref_delt_share": 0.329,
+      "ref_up_delt_ratio": 0.902,
+      "ref_delt_peak": 0.697
+     }
+    }
+   }
+  ],
+  "clean": 3,
+  "cheats": 1,
+  "first_cheat_rep": 4,
+  "decision": {
+   "next": "continue",
+   "reason": "3 clean, 1 cheat (first at rep 4). Delt took over before rep 6; if the next set does that too, stop at the first cheat and rest longer. Same weight."
+  },
+  "calibration": {
+   "rest": [
+    541,
+    499,
+    735,
+    584
+   ],
+   "mvc": [
+    14969,
+    14958,
+    14958,
+    12969
+   ],
+   "ok": true,
+   "problems": []
+  }
+ },
+ "coach_line_at_the_time": "Rep 4 was a mild cheat: left shoulder at 1 time normal, rushed up. Three clean reps before that. Same weight, keep going."
+}

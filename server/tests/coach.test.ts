@@ -164,7 +164,7 @@ test("mentionsLoadChange", () => {
 test("fallbackSummary phrases the decision", () => {
   assert.equal(
     fallbackSummary(swingSet()),
-    "Reps 6 and 7 were cheats: your shoulder took over. Next set, stop at the first cheat.",
+    "Reps 6 and 7: your right shoulder took over. Next set, stop at the first cheat.",
   );
   assert.match(fallbackSummary(set([rep(), rep()])), /^Still learning your clean rep, so no calls yet\. 2 reps in/);
   assert.match(fallbackSummary(set([rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.2 }), rep({ baseline_up_delt_ratio: 0.2, up_delt_ratio: 0.22 })])), /^All 2 reps clean, shoulder in its normal range\./);

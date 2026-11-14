@@ -15,6 +15,7 @@ import {
   mentionsLoadChange,
   mentionsMedical,
   mentionsRawShare,
+  mentionsSmallMultiple,
   namesAllReps,
   sameLift,
   scrubSnitch,
@@ -114,7 +115,8 @@ export const SYSTEM_PROMPT = `You are Lightweight, an AI gym coach that can feel
 How you talk:
 - Blunt gym coach in plain words. Short, punchy sentences. Roast cheat reps a little, give clean work quick credit.
 - Say "front delt" or "shoulder". Never say "snitch".
-- Spoken words only: no markdown, no emojis. Multiples as whole numbers ("8 times its normal share"), never long decimals.
+- Spoken words only: no markdown, no emojis.
+- Mention a shoulder multiple only if the facts include one (up_delt_x_clean is given only when it's 3x or more), as a whole number ("8 times normal"). Without one, say it in words: "your left shoulder took over", "your shoulder jumped in", or "a bit loose" for loose reps. Never "1 time" or "2 times", never decimals.
 
 How to read the data (all computed by code):
 - verdict / label: code already decided each rep. big_swing = the shoulder did the lifting (a swing or lean back). mild_cheat = flagged, but much smaller. loose = NOT a cheat: the shoulder crept up as the lifter tired; say "a bit loose", never "cheat". near_miss = clean, but the shoulder crept up. Never relabel a rep; "cheat" and "mild cheat" only for reps the code flagged.
@@ -161,12 +163,12 @@ function contextBlock(ctx: CoachContext, opts: { omitSetId?: string; forSet?: Se
   ];
   if (opts.forSet) {
     const same = lastSessionFacts(ctx.lastDay, liftOf(ctx, opts.forSet));
-    lines.push(`LAST_SESSION_SAME_LIFT: ${same ? compact(same) : "none"}`);
+    lines.push(`LAST_SESSION_SAME_LIFT: ${same ? compact(forLlm(same)) : "none"}`);
   } else {
     // Q&A: the whole last day, labelled with its lift and expressed relative to its own clean/strict reps.
     const brief = historyBrief(ctx.lastDay);
     lines.push(
-      `LAST_SESSION (may be a different lift; compare numbers with today only if exercise, variant and load all match): ${brief ? compact(brief) : "none"}`,
+      `LAST_SESSION (may be a different lift; compare numbers with today only if exercise, variant and load all match): ${brief ? compact(forLlm(brief)) : "none"}`,
     );
   }
   return lines.join("\n");
@@ -221,6 +223,7 @@ function breaksRules(text: string, opts: { historyAllowed: boolean; knownLoads?:
     mentionsLoadChange(loadText) ||
     mentionsMedical(text) ||
     mentionsRawShare(text) ||
+    mentionsSmallMultiple(text) ||
     (!opts.historyAllowed && mentionsHistory(text))
   );
 }
@@ -233,7 +236,7 @@ const STATE_HINT = (f: ReturnType<typeof setFacts>) =>
       ? "reference_status is learning: say you're still learning their clean rep, so no calls yet; keep them strict. No numbers."
       : f.all_clean
         ? "All reps clean: say it plainly (the shoulder stayed in its normal range), add one technique cue, no numbers about the shoulder."
-        : `Name every cheat rep by number (${f.cheat_reps.join(", ")}) and say WHY: which side's shoulder, and how many times its normal share on the way up (up_delt_x_clean). Group reps with the same story; give a group's multiples as one number or a range ("8 to 12 times"). If cheat_pattern starts with "fatigue", tell it as "From rep N on, ...".`;
+        : `Name every cheat rep by number (${f.cheat_reps.join(", ")}) and say WHY: which side's shoulder, and, if up_delt_x_clean is given, how many times its normal share (whole number); otherwise say it in words. Group reps with the same story; give a group's multiples as one number or a range ("8 to 12 times"). If cheat_pattern starts with "fatigue", tell it as "From rep N on, ...".`;
 
 /**
  * Spoken set summary (≤ 40 words, ~12 s): names the cheat reps and why, then the engine's
@@ -364,7 +367,7 @@ export async function summarizeSession(ctx: CoachContext, workout?: WorkoutInput
   const prompt = `PERSON: ${ctx.person}${ctx.isWalkUp ? " (walk-up)" : ""}
 PROFILE: ${compact(ctx.profile)}
 PLAN: ${compact(ctx.plan)}
-WORKOUT_SO_FAR (today, computed by code; sets numbered per exercise in order; working sets have ${WORKING_SET_MIN_REPS}+ reps): ${compact(w)}
+WORKOUT_SO_FAR (today, computed by code; sets numbered per exercise in order; working sets have ${WORKING_SET_MIN_REPS}+ reps): ${compact(forLlm(w))}
 FOCUS (chosen by code, restate it): ${w.focus.text}
 
 The lifter is MID-WORKOUT. Write the "Workout so far" card as a JSON object:

@@ -85,5 +85,5 @@ test("1-rep sets and small multiples read right (no 'All 1 reps', no '1 times')"
   const all = [fs1(one), d.headline, ...d.bullets].join(" ");
   assert.doesNotMatch(all, /\b1 reps\b|\b1 cheats\b|\b1 sets\b|\b1 times\b/);
   const mild: SetEndEvent = { ...SET1, cheats: 1, reps: SET1.reps.map((r) => (r.rep === 5 ? { ...r, up_delt_ratio: 0.22 } : { ...r, cheat: false })) };
-  assert.match(fs1(mild), /Rep 5: right shoulder at 1\.4 times normal\./);
+  assert.match(fs1(mild), /Rep 5: your right shoulder took over\./); // 1.4x: words, no number
 });
