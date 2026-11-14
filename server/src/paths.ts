@@ -9,4 +9,3 @@ export const SERVER_DIR = existsSync(resolve(fromCwd, "public", "index.html")) ?
 export const REPO_ROOT = resolve(SERVER_DIR, "..");
 export const PUBLIC_DIR = resolve(SERVER_DIR, "public");
 export const DB_PATH = process.env.LW_DB_PATH ?? resolve(REPO_ROOT, "data", "lightweight.sqlite");
-export const VOICE_CACHE_DIR = resolve(SERVER_DIR, ".cache", "voice");

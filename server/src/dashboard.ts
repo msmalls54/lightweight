@@ -41,6 +41,7 @@ function wrap(fn: (c: Context) => unknown | Promise<unknown>) {
 export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store: Store, hub: Hub) {
   app.get("/", c => sendFile(c, join(PUBLIC_DIR, "index.html")));
   app.get("/app.js", c => sendFile(c, join(PUBLIC_DIR, "app.js")));
+  app.get("/voice-player.js", c => sendFile(c, join(PUBLIC_DIR, "voice-player.js")));
   app.get("/public/:file", c => {
     const f = c.req.param("file");
     if (!/^[\w.-]+\.(js|css|svg|png|wav|mp3|json)$/.test(f) || f.includes("..")) return c.json({ error: "Not found" }, 404);

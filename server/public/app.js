@@ -18,11 +18,11 @@
     speechSynthesis.cancel();
     speechSynthesis.speak(new SpeechSynthesisUtterance(text));
   }
-  function playClip(key) {
-    if (!key) return;
+  function playClip(keys) { // a clip key or an array of keys stitched in order (e.g. ["rep_6", "delt_took_over"])
+    if (!keys || (Array.isArray(keys) && !keys.length)) return;
     const A = window.LWAudio;
-    if (A && typeof A.playClip === "function") { try { A.playClip(key); } catch (e) { console.warn("playClip failed", e); } return; }
-    speakFallback(key.replace(/_/g, " "));
+    if (A && typeof A.playClip === "function") { try { A.playClip(keys); } catch (e) { console.warn("playClip failed", e); } return; }
+    speakFallback([].concat(keys).map(k => k.replace(/_/g, " ")).join(". "));
   }
   function say(text) {
     if (!text) return;
@@ -166,6 +166,7 @@
     if (cuePlayed.size > 200) cuePlayed.delete(cuePlayed.keys().next().value);
   }
   function onSetEnd(e) {
+    playClip(e.cue);
     const total = e.clean + e.cheats;
     addFeed(`<span class="t">Set ${e.set_no ?? ""} done</span><span class="tag" style="color:var(--blue)">${total} reps</span>
       <span class="d">${e.clean} clean · ${e.cheats} cheat${e.first_cheat_rep ? ` · first cheat rep ${e.first_cheat_rep}` : ""} · next: ${esc(e.decision?.next ?? "")}</span>`, "setend");
@@ -365,5 +366,9 @@
     return false;
   }
   if (!hookMusic()) window.addEventListener("load", hookMusic);
+  // Browsers only start Web Audio after a user gesture: unlock on the first click/key.
+  const unlock = () => { try { window.LWAudio?.unlock?.(); } catch { /* ignore */ } };
+  window.addEventListener("pointerdown", unlock, { once: true });
+  window.addEventListener("keydown", unlock, { once: true });
   if (window.__lwNoVoice) console.info("voice-player.js not found; using browser speech as a fallback.");
 })();

@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Batch, Calibration, RepEvent, SetContext, SetEndEvent, Arm } from "./modules.js";
+import type { Batch, Calibration, RepEvent, SetContext, SetEndEvent, Arm, SetMeta } from "./modules.js";
 import type { Heartbeat } from "./schemas.js";
 
 export type SessionKind = "live" | "fake" | "replay";
@@ -92,6 +92,9 @@ export class Store {
     this.db.prepare("INSERT OR REPLACE INTO reps(set_id,session_id,arm,rep,cheat,delt_share,payload,created_at) VALUES (?,?,?,?,?,?,?,?)")
       .run(r.set_id, sessionId, r.arm, r.rep, r.cheat ? 1 : 0, r.delt_share, JSON.stringify(r), new Date().toISOString());
   }
+  hasRep(setId: string, arm: string, rep: number) {
+    return !!this.db.prepare("SELECT 1 FROM reps WHERE set_id=? AND arm=? AND rep=?").get(setId, arm, rep);
+  }
   endSet(e: SetEndEvent) { this.db.prepare("UPDATE sets SET ended_at=?, summary=? WHERE set_id=?").run(new Date().toISOString(), JSON.stringify(e), e.set_id); }
   saveCoachLine(setId: string, line: string) { this.db.prepare("UPDATE sets SET coach_line=? WHERE set_id=?").run(line, setId); }
 
@@ -121,6 +124,13 @@ export class Store {
     return (this.db.prepare(`SELECT t.summary FROM sets t JOIN sessions s ON s.session_id=t.session_id
         WHERE s.person=? AND s.kind='live' AND s.is_walkup=0 AND t.summary IS NOT NULL AND t.started_at>=? ORDER BY t.started_at`)
       .all(person, midnight.toISOString()) as { summary: string }[]).map(r => JSON.parse(r.summary) as SetEndEvent);
+  }
+  /** set_id -> exercise/variant/load for today's live sets (writeTodayHistory's setMeta). */
+  todaySetMeta(person: string): Record<string, SetMeta> {
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const rows = this.db.prepare(`SELECT t.set_id, t.ctx FROM sets t JOIN sessions s ON s.session_id=t.session_id
+        WHERE s.person=? AND s.kind='live' AND s.is_walkup=0 AND t.started_at>=?`).all(person, midnight.toISOString()) as { set_id: string; ctx: string }[];
+    return Object.fromEntries(rows.map(r => { const c = JSON.parse(r.ctx) as SetContext; return [r.set_id, { exercise: c.exercise, variant: c.variant, load_lb: c.load_lb }]; }));
   }
   close() { this.db.close(); }
 }

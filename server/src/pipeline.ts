@@ -1,5 +1,5 @@
 // batch -> store -> engine.ingest -> events -> SSE (+ pickCue). Also sets, calibration and replay.
-import { Engine, pickCue, buildCoachContext, summarizeSet, writeTodayHistory,
+import { Engine, pickCueSequence, pickSetEndCue, buildCoachContext, summarizeSet, writeTodayHistory,
   type Arm, type Batch, type Calibration, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "./modules.js";
 import type { Store, SessionKind, EventRow } from "./store.js";
 import type { Hub } from "./hub.js";
@@ -104,20 +104,29 @@ export class Pipeline {
     const ctx = sess.set && sess.set.set_id === rep.set_id ? sess.set : null;
     if (ctx) sess.setNo = this.store.ensureSet(ctx);
     this.store.saveRep(sess.id, rep);
-    let cue: string | null = null;
-    try { cue = pickCue(rep); } catch (e) { console.error("[coach] pickCue failed:", errMsg(e)); }
+    let cue: string[] = [];
+    try { cue = pickCueSequence(rep, { variant: ctx?.variant }); } catch (e) { console.error("[coach] pickCueSequence failed:", errMsg(e)); }
     this.hub.send({ ...rep, set_no: sess.setNo, cue, session_id: sess.id, exercise: ctx?.exercise ?? null });
   }
 
   private onSetEnd(sess: Sess, e: SetEndEvent, ctx: SetContext | null) {
     if (!e.reps.length) return; // armed but nobody curled: not a set
     const setNo = ctx ? this.store.ensureSet(ctx) : sess.setNo;
+    // endSet() can close a final rep that never had its own rep event: store + show it now (no call-out).
+    for (const r of e.reps) {
+      if (this.store.hasRep(r.set_id, r.arm, r.rep)) continue;
+      this.store.saveRep(sess.id, r);
+      this.hub.send({ ...r, set_no: setNo, cue: [], session_id: sess.id, exercise: ctx?.exercise ?? null, late: true });
+    }
     this.store.endSet(e);
     sess.sets.push(e);
-    this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null });
+    let cue: string | null = null;
+    try { cue = pickSetEndCue(e); } catch (err) { console.error("[coach] pickSetEndCue failed:", errMsg(err)); }
+    this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null, cue });
     void this.coach(sess, e);
     if (sess.kind === "live" && !sess.isWalkUp) {
-      try { writeTodayHistory(this.store.todaySetEnds(sess.person)); } catch (err) { console.error("[coach] writeTodayHistory failed:", errMsg(err)); }
+      try { writeTodayHistory(this.store.todaySetEnds(sess.person), { person: sess.person, setMeta: this.store.todaySetMeta(sess.person) }); }
+      catch (err) { console.error("[coach] writeTodayHistory failed:", errMsg(err)); }
     }
   }
 

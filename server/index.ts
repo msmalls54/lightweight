@@ -2,13 +2,13 @@ import { MCPServer } from "mcp-use/server";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadEnvFile } from "node:process";
-import { REPO_ROOT, DB_PATH, VOICE_CACHE_DIR } from "./src/paths.js";
+import { REPO_ROOT, DB_PATH } from "./src/paths.js";
 import { Store } from "./src/store.js";
 import { Hub } from "./src/hub.js";
 import { Pipeline } from "./src/pipeline.js";
 import { addGuard, addReceiver } from "./src/receiver.js";
 import { addDashboard } from "./src/dashboard.js";
-import { initVoice, registerVoiceRoutes } from "./src/modules.js";
+import { initVoice, registerVoiceRoutes, loadGeminiKey, DEFAULT_VOICE_CACHE } from "./src/modules.js";
 import { registerTools } from "./src/mcp/tools.js";
 
 // Repo-root .env holds GEMINI_API_KEY. Never print it.
@@ -25,8 +25,10 @@ if (!G.__lightweight) {
   G.__lightweight = { store, hub, pipeline: new Pipeline(store, hub) };
 }
 const lw = G.__lightweight;
-if (!lw.voice && process.env.GEMINI_API_KEY) {
-  lw.voice = initVoice({ apiKey: process.env.GEMINI_API_KEY, cacheDir: VOICE_CACHE_DIR })
+const geminiKey = loadGeminiKey(); // walks up from cwd to the repo .env; never print it
+if (!lw.voice && geminiKey) {
+  // Not awaited: ~80 s the first time (TTS for every clip), instant once server/.cache/voice is warm.
+  lw.voice = initVoice({ apiKey: geminiKey, cacheDir: DEFAULT_VOICE_CACHE })
     .catch(e => console.error("[voice] init failed:", e instanceof Error ? e.message : e));
 }
 
