@@ -6,9 +6,13 @@
 //  - Sampling runs in a hardware timer interrupt at 200 Hz (FspTimer), so nothing the network
 //    does in loop() can delay or drop a sample. WiFiS3 calls are blocking AT commands over a
 //    UART to the ESP32-S3; that's fine here because they only block loop().
-//  - The sample ring buffer IS the offline queue: batch `seq` k = samples [40k, 40k+40).
-//    loop() sends the oldest unacked batch, one POST per batch, and only advances on HTTP 200.
-//    A resend keeps its seq. If more than QUEUE_MAX batches are pending, the oldest are dropped.
+//  - The sample ring buffer IS the offline queue: batch index k = samples [40k, 40k+40).
+//    loop() sends everything pending, oldest first, up to K_MAX batches coalesced into one POST
+//    (same JSON shape, k*40 samples per channel, seq = the first batch's seq, "n_batches": k),
+//    and only advances on HTTP 200. A retry resends the identical group (server dedupes on
+//    device+seq+t0_ms). If more than QUEUE_MAX batches are pending, the oldest are dropped.
+//  - Throughput is bound by the 115,200-baud UART to the ESP32-S3 (~70-80 ms per batch of
+//    JSON), so coalescing amortizes the fixed per-POST cost (WiFi RTT, AT round trips, reply).
 //  - seq starts at bootCount * 1,000,000 (boot counter in EEPROM), so a reboot never reuses a
 //    seq the server already saw (it ignores duplicate seqs).
 //  - HTTP/1.1 keep-alive to the laptop; reconnect on any error. Wi-Fi retries forever.
@@ -17,17 +21,20 @@
 //    ~87 us/byte (only loop(), never the sampler) and availableForWrite() always returns 0.
 //
 // Wire format (BUILD.md, do not change):
-//   POST /ingest    {"device":"lw-uno-1","seq":N,"t0_ms":T,"dt_ms":5,"ch":[[..40..],[..],[..],[..]]}
-//   POST /heartbeat {"device":"lw-uno-1","seq":N,"uptime_ms":U,"rssi":R,"queue":Q,"fw":"0.1.0","dropped":D}
-//   ("dropped" is an extra field: total batches dropped from the offline queue since boot.)
+//   POST /ingest    {"device":"lw-uno-1","seq":N,"t0_ms":T,"dt_ms":5,"n_batches":k,"ch":[[..40k..],[..],[..],[..]]}
+//   POST /heartbeat {"device":"lw-uno-1","seq":N,"uptime_ms":U,"rssi":R,"queue":Q,"fw":"0.2.0","dropped":D,
+//                    "post_rtt_ms":last,"post_rtt_max_ms":max,"coalesce_max":k,"posts":P,"batches":B}
+//   Extra fields (n_batches, dropped, post_rtt_*, coalesce_max, posts, batches) are additions;
+//   the last five describe the ~2 s since the previous heartbeat. dropped = since boot.
 
 #include <WiFiS3.h>
 #include <EEPROM.h>
 #include "FspTimer.h"
 #include "arduino_secrets.h"
+#include "stream_out.h"
 
 #define DEVICE_ID "lw-uno-1"
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.2.0"
 
 // ---------- config ----------
 static const float    SAMPLE_HZ      = 200.0f;
@@ -40,12 +47,13 @@ static const uint8_t  RING_BATCHES   = 45;                    // ring slots (one
 static const uint16_t RING_N         = RING_BATCHES * BATCH_N;
 static const uint8_t  QUEUE_MAX      = RING_BATCHES - 2;      // 43 batches = 8.6 s offline, 1 slot of margin
 static const uint8_t  SAMPLE_BYTES   = 7;
+static const uint8_t  K_MAX          = 8;                     // max batches per POST (320 samples)
 static const float    EMA_ALPHA      = 0.0952f;               // 1 - exp(-5 ms / 50 ms)
 static const uint32_t HEARTBEAT_MS   = 2000;
 static const uint32_t RESP_TIMEOUT_MS = 1500;
 static const uint16_t CONNECT_TIMEOUT_MS = 2000;
 static const uint32_t WIFI_JOIN_TIMEOUT_MS = 8000;
-static const uint32_t SERIAL_LINE_MS = 100;
+static const uint32_t SERIAL_LINE_MS = 250;   // each line blocks loop() ~4 ms (UART bridge)
 static const uint32_t SERIAL_STATUS_MS = 5000;
 static const uint8_t  ADC_PINS[NCH]  = {A0, A1, A2, A3};
 
@@ -107,23 +115,29 @@ static uint32_t seqBase = 0;          // added to the batch index to form the wi
 static uint32_t nextSend = 0;         // batch index (not wire seq) of the oldest unacked batch
 static uint32_t droppedBatches = 0;
 static uint32_t sentBatches = 0, failedPosts = 0, heartbeatsOk = 0, reconnects = 0, wifiJoins = 0;
-static uint32_t rttSumMs = 0, rttCount = 0, rttMaxMs = 0;
+static uint32_t rttSumMs = 0, rttCount = 0, rttMaxMs = 0;          // serial status window
 static uint32_t lastHeartbeatMs = 0, nextNetAttemptMs = 0, backoffMs = 250;
 static uint32_t lastSerialLineMs = 0, lastStatusMs = 0, lastWifiCheckMs = 0;
 static uint32_t startMicros = 0;
 static bool wifiUp = false;
 static int32_t lastRssi = 0;
 static int lastErr = 0;          // last non-200 result from httpPost (negative = transport error)
+static const uint32_t NO_GROUP = 0xFFFFFFFF;
+static uint32_t inflightStart = NO_GROUP;  // first batch of the last unacked /ingest attempt
+static uint8_t inflightK = 0;              // ... and how many batches it carried
+static uint32_t lastOkMs = 0;              // last completed HTTP exchange (keep-alive idle check)
+// Heartbeat window (reset at each heartbeat): what the link did over the last ~2 s.
+static uint32_t winRttLast = 0, winRttMax = 0, winPosts = 0, winBatches = 0;
+static uint8_t winCoalesceMax = 0;
+static uint32_t statPosts = 0, statBatches = 0;  // serial status window
+static uint8_t statCoalesceMax = 0;
 
 static WiFiClient client;
 static bool sockOpen = false;
 
-// One TX buffer: the JSON body is built at tx + HDR_RESERVE, then the HTTP header is written
-// right in front of it, so header + body go out in a single AT send.
-static const uint16_t HDR_RESERVE = 192;
-static char tx[HDR_RESERVE + 1100];
-static char *const body = tx + HDR_RESERVE;
-static const uint16_t BODY_MAX = sizeof(tx) - HDR_RESERVE;
+// Requests are streamed out in TX_CHUNK pieces (one AT send each): an 8-batch body is ~7 KB,
+// far more than the RAM we have left, so we never hold a whole body.
+static char tx[1400];
 static char resp[64];      // one HTTP response header line (lowercased, truncated)
 static uint8_t rchunk[128];
 
@@ -134,52 +148,67 @@ static char *putU(char *p, uint32_t v) {
   while (i) *p++ = tmp[--i];
   return p;
 }
-static char *putI(char *p, int32_t v) {
-  if (v < 0) { *p++ = '-'; v = -v; }
-  return putU(p, (uint32_t)v);
-}
 static char *putS(char *p, const char *s) { while (*s) *p++ = *s++; return p; }
 
 static uint32_t completeBatches() { return samplesNow() / BATCH_N; }
 
-// Drop the oldest pending batches if the backlog exceeds the queue (ring) capacity.
+// Drop the oldest pending batches if the backlog exceeds the queue (ring) capacity. If that
+// cuts into the group of a failed attempt, drop the rest of that group too: the server may
+// already hold it under the group's first seq, and a new group must never overlap it.
 static void enforceQueueLimit() {
   uint32_t done = completeBatches();
   if (done - nextSend > QUEUE_MAX) {
     uint32_t drop = (done - nextSend) - QUEUE_MAX;
     nextSend += drop;
     droppedBatches += drop;
+    if (inflightStart != NO_GROUP && nextSend > inflightStart) {
+      uint32_t end = inflightStart + inflightK;
+      if (nextSend < end) { droppedBatches += end - nextSend; nextSend = end; }
+      inflightStart = NO_GROUP;
+    }
   }
 }
 
-// Build the /ingest JSON for batch index b into body[]. Returns length, or 0 if the slot was
-// overwritten while copying (can't happen with QUEUE_MAX margin, but checked anyway).
-static size_t buildBatch(uint32_t b) {
-  uint8_t s = b % RING_BATCHES;
-  char *p = body;
-  p = putS(p, "{\"device\":\"" DEVICE_ID "\",\"seq\":");
-  p = putU(p, seqBase + b);
-  p = putS(p, ",\"t0_ms\":");
-  p = putU(p, batchT0[s]);
-  p = putS(p, ",\"dt_ms\":");
-  p = putU(p, DT_MS);
-  p = putS(p, ",\"ch\":[");
-  uint16_t first = (uint16_t)s * BATCH_N;
+// /ingest body for batches [b0, b0+k): same shape as one batch, just k*40 samples per channel.
+// Samples are contiguous at 5 ms, so t0_ms of the first batch + dt_ms describes them all.
+static void emitIngest(Out &o, uint32_t b0, uint8_t k) {
+  o.str("{\"device\":\"" DEVICE_ID "\",\"seq\":"); o.u(seqBase + b0);
+  o.str(",\"t0_ms\":"); o.u(batchT0[b0 % RING_BATCHES]);
+  o.str(",\"dt_ms\":5,\"n_batches\":"); o.u(k);
+  o.str(",\"ch\":[");
   uint16_t v[NCH];
   for (uint8_t c = 0; c < NCH; c++) {
-    if (c) *p++ = ',';
-    *p++ = '[';
-    for (uint8_t i = 0; i < BATCH_N; i++) {
-      if (i) *p++ = ',';
-      readSample(first + i, v);   // unpack per value: cheap, saves a 320 B buffer
-      p = putU(p, v[c]);
+    if (c) o.ch(',');
+    o.ch('[');
+    for (uint8_t j = 0; j < k; j++) {
+      uint16_t first = (uint16_t)((b0 + j) % RING_BATCHES) * BATCH_N;
+      for (uint8_t i = 0; i < BATCH_N; i++) {
+        if (j || i) o.ch(',');
+        readSample(first + i, v);   // unpack per value: cheap, saves RAM
+        o.u(v[c]);
+      }
     }
-    *p++ = ']';
+    o.ch(']');
   }
-  p = putS(p, "]}");
-  // Overwrite check: the ISR must not have started writing batch b + RING_BATCHES.
-  if (samplesNow() > (b + RING_BATCHES) * (uint32_t)BATCH_N) return 0;
-  return p - body;
+  o.str("]}");
+}
+
+// emit runs twice (dry count, then send), so every value must be fixed before the first pass:
+// a = uptime snapshot, hbDone = completed-batch snapshot (set by the caller).
+static uint32_t hbDone = 0;
+static void emitHeartbeat(Out &o, uint32_t uptime, uint8_t) {
+  uint32_t done = hbDone;
+  o.str("{\"device\":\"" DEVICE_ID "\",\"seq\":"); o.u(seqBase + (done ? done - 1 : 0));
+  o.str(",\"uptime_ms\":"); o.u(uptime);
+  o.str(",\"rssi\":"); o.i(lastRssi);
+  o.str(",\"queue\":"); o.u(done - nextSend);
+  o.str(",\"fw\":\"" FW_VERSION "\",\"dropped\":"); o.u(droppedBatches);
+  o.str(",\"post_rtt_ms\":"); o.u(winRttLast);
+  o.str(",\"post_rtt_max_ms\":"); o.u(winRttMax);
+  o.str(",\"coalesce_max\":"); o.u(winCoalesceMax);
+  o.str(",\"posts\":"); o.u(winPosts);
+  o.str(",\"batches\":"); o.u(winBatches);
+  o.ch('}');
 }
 
 static void closeSock() {
@@ -195,9 +224,12 @@ static void netFailed(int code) {
   backoffMs = min<uint32_t>(backoffMs * 2, 2000);
 }
 
-// POST body[0..len) to path. Returns the HTTP status (200 = ok) or a negative error code.
-static int httpPost(const char *path, size_t len) {
-  if (sockOpen && !client.connected()) closeSock();
+// POST the body produced by emit(a, k) to path. Returns the HTTP status (200 = ok) or a
+// negative error. If guard is set, `a` is a batch index whose ring slot must not be overwritten
+// while we stream it; if it was, the request is aborted before its last bytes go out.
+static int httpPost(const char *path, EmitFn emit, uint32_t a, uint8_t k, bool guard, uint32_t &rttOut) {
+  // Server keep-alive timeout is 5 s; we talk at least every 2 s, but reopen if we've been idle.
+  if (sockOpen && millis() - lastOkMs > 4000) closeSock();
   if (!sockOpen) {
     client.setConnectionTimeout(CONNECT_TIMEOUT_MS);
     if (!client.connect(LAPTOP_IP, LAPTOP_PORT)) return -1;
@@ -205,31 +237,33 @@ static int httpPost(const char *path, size_t len) {
     reconnects++;
   }
 
-  // Header goes right in front of the body: header + body in a single write = one AT send.
-  char hdr[HDR_RESERVE];
-  char *p = hdr;
-  p = putS(p, "POST ");
-  p = putS(p, path);
-  p = putS(p, " HTTP/1.1\r\nHost: " LAPTOP_IP "\r\nContent-Type: application/json\r\nConnection: keep-alive\r\nContent-Length: ");
-  p = putU(p, len);
-  p = putS(p, "\r\n\r\n");
-  size_t hlen = p - hdr;
-  if (hlen > HDR_RESERVE || len > BODY_MAX) return -2;
-  char *start = body - hlen;
-  memcpy(start, hdr, hlen);
-  uint32_t t = millis();
-  if (client.write((const uint8_t *)start, hlen + len) != hlen + len) return -3;
+  Out d = {&client, tx, sizeof(tx), true, true, 0, 0};
+  emit(d, a, k);
 
-  // Read the full response so keep-alive stays in sync. Headers are parsed line by line, so
-  // any header length works (the real server sends ~230 bytes of headers incl. CORS).
+  uint32_t t = millis();
+  Out o = {&client, tx, sizeof(tx), false, true, 0, 0};
+  o.str("POST "); o.str(path);
+  o.str(" HTTP/1.1\r\nHost: " LAPTOP_IP "\r\nContent-Length: "); o.u(d.total);
+  o.str("\r\n\r\n");
+  emit(o, a, k);
+  if (guard && samplesNow() > (a + RING_BATCHES) * (uint32_t)BATCH_N) {
+    closeSock();   // the oldest batch was overwritten mid-stream: never complete this request
+    return -7;
+  }
+  o.flush();
+  if (!o.ok) return -3;
+
+  // Read the full response so keep-alive stays in sync (it's one ~260 B TCP segment, fetched
+  // in one AT receive). Headers are parsed line by line, so any header length works.
+  uint32_t tw = millis();
   size_t lineLen = 0;
   bool gotStatus = false, inBody = false, closeAfter = false;
   long contentLen = -1, bodyRead = 0;
   int status = -6;  // garbage status line
-  while (millis() - t < RESP_TIMEOUT_MS) {
-    int a = client.available();
-    if (a <= 0) continue;
-    int r = client.read(rchunk, min(a, (int)sizeof(rchunk)));
+  while (millis() - tw < RESP_TIMEOUT_MS) {
+    int av = client.available();
+    if (av <= 0) continue;
+    int r = client.read(rchunk, min(av, (int)sizeof(rchunk)));
     if (r <= 0) continue;
     for (int i = 0; i < r; i++) {
       char c = (char)rchunk[i];
@@ -255,27 +289,12 @@ static int httpPost(const char *path, size_t len) {
   if (!inBody) return -4;  // timeout before the headers ended
   if (contentLen >= 0 && bodyRead != contentLen) closeAfter = true;  // out of sync: start fresh
   uint32_t rtt = millis() - t;
+  rttOut = rtt;
   rttSumMs += rtt; rttCount++;
   if (rtt > rttMaxMs) rttMaxMs = rtt;
+  lastOkMs = millis();
   if (closeAfter) closeSock();
   return status;
-}
-
-static size_t buildHeartbeat() {
-  char *p = body;
-  uint32_t done = completeBatches();
-  p = putS(p, "{\"device\":\"" DEVICE_ID "\",\"seq\":");
-  p = putU(p, seqBase + (done ? done - 1 : 0));
-  p = putS(p, ",\"uptime_ms\":");
-  p = putU(p, millis());
-  p = putS(p, ",\"rssi\":");
-  p = putI(p, lastRssi);
-  p = putS(p, ",\"queue\":");
-  p = putU(p, done - nextSend);
-  p = putS(p, ",\"fw\":\"" FW_VERSION "\",\"dropped\":");
-  p = putU(p, droppedBatches);
-  p = putS(p, "}");
-  return p - body;
 }
 
 // ---------- Wi-Fi ----------
@@ -337,18 +356,21 @@ static void serialOut() {
     tickMaxGapUs = 0; tickMinGapUs = 0xFFFFFFFF; isrMaxUs = 0;
     interrupts();
     uint32_t expected = (micros() - startMicros) / 5000;
-    char line[256];
+    char line[320];
     snprintf(line, sizeof(line),
-             "# wifi=%d rssi=%ld sent=%lu fail=%lu err=%d drop=%lu hb=%lu conn=%lu q=%lu "
+             "# wifi=%d rssi=%ld sent=%lu fail=%lu err=%d drop=%lu hb=%lu conn=%lu q=%lu posts=%lu k_avg=%lu.%lu k_max=%u "
              "rtt_avg=%lums rtt_max=%lums samples=%lu expected~%lu tick_us=%lu..%lu isr_max=%luus\r\n",
              wifiUp ? 1 : 0, (long)lastRssi, (unsigned long)sentBatches, (unsigned long)failedPosts,
              lastErr, (unsigned long)droppedBatches, (unsigned long)heartbeatsOk, (unsigned long)reconnects,
-             (unsigned long)(n / BATCH_N - nextSend),
+             (unsigned long)(n / BATCH_N - nextSend), (unsigned long)statPosts,
+             (unsigned long)(statPosts ? statBatches / statPosts : 0),
+             (unsigned long)(statPosts ? (statBatches * 10 / statPosts) % 10 : 0), (unsigned)statCoalesceMax,
              (unsigned long)(rttCount ? rttSumMs / rttCount : 0), (unsigned long)rttMaxMs,
              (unsigned long)n, (unsigned long)expected,
              (unsigned long)(gmin == 0xFFFFFFFF ? 0 : gmin), (unsigned long)gmax, (unsigned long)imax);
     Serial.write((const uint8_t *)line, strlen(line));
     rttSumMs = 0; rttCount = 0; rttMaxMs = 0;
+    statPosts = 0; statBatches = 0; statCoalesceMax = 0;
   }
 }
 
@@ -388,38 +410,62 @@ void loop() {
   serialOut();
   enforceQueueLimit();
   if (!ensureWifi()) return;
-  serialOut();
 
   uint32_t now = millis();
   if ((int32_t)(now - nextNetAttemptMs) < 0) return;
 
-  // Heartbeat every 2 s (interleaved with batches).
+  // Heartbeat every 2 s (interleaved with batches), carrying the link stats of that window.
   if (now - lastHeartbeatMs >= HEARTBEAT_MS) {
     lastHeartbeatMs = now;
     lastRssi = WiFi.RSSI();
-    size_t len = buildHeartbeat();
-    int st = httpPost("/heartbeat", len);
-    if (st == 200) { heartbeatsOk++; backoffMs = 250; }
-    else { netFailed(st); return; }
+    uint32_t rtt = 0;
+    hbDone = completeBatches();
+    int st = httpPost("/heartbeat", emitHeartbeat, millis(), 0, false, rtt);
+    if (st != 200) { netFailed(st); return; }
+    heartbeatsOk++;
+    backoffMs = 250;
+    winRttLast = 0; winRttMax = 0; winPosts = 0; winBatches = 0; winCoalesceMax = 0;
   }
 
-  // Oldest unacked batch.
+  // Send everything pending (oldest first), up to K_MAX batches per POST. Live this is 1-2
+  // batches per POST; after an outage it's K_MAX until the backlog is gone.
   enforceQueueLimit();
-  if (nextSend < completeBatches()) {
-    size_t len = buildBatch(nextSend);
-    if (len == 0) { nextSend++; droppedBatches++; return; }
-    int st = httpPost("/ingest", len);
-    if (st == 200) {
-      nextSend++;
-      sentBatches++;
-      backoffMs = 250;
-    } else if (st >= 400 && st < 500) {
-      // Server read it and refused it (bad request / no route). Resending won't help: skip it.
-      Serial.print("# ingest rejected, http "); Serial.println(st);
-      nextSend++;
-      droppedBatches++;
-    } else {
-      netFailed(st);
-    }
+  uint32_t done = completeBatches();
+  if (nextSend >= done) return;
+  uint8_t k;
+  if (inflightStart == nextSend) {
+    k = inflightK;  // retry: identical grouping, so the server's (seq, t0_ms) dedupe matches it
+  } else {
+    uint32_t pending = done - nextSend;
+    k = (uint8_t)min<uint32_t>(pending, K_MAX);
+    // Batches left before the ISR overwrites nextSend's slot. Streaming k batches takes
+    // roughly (1 + k/2) batch periods, so keep k small when we're near the ring's edge.
+    uint32_t room = nextSend + RING_BATCHES - done;
+    uint32_t kRoom = room >= 2 ? 2 * room - 3 : 1;
+    if (k > kRoom) k = (uint8_t)kRoom;
+    inflightStart = nextSend;
+    inflightK = k;
+  }
+  uint32_t rtt = 0;
+  int st = httpPost("/ingest", emitIngest, nextSend, k, true, rtt);
+  if (st == 200) {
+    nextSend += k;
+    sentBatches += k;
+    inflightStart = NO_GROUP;
+    backoffMs = 250;
+    winRttLast = rtt;
+    if (rtt > winRttMax) winRttMax = rtt;
+    winPosts++; winBatches += k;
+    if (k > winCoalesceMax) winCoalesceMax = k;
+    statPosts++; statBatches += k;
+    if (k > statCoalesceMax) statCoalesceMax = k;
+  } else if (st >= 400 && st < 500) {
+    // Server read it and refused it (bad request / no route). Resending won't help: skip it.
+    Serial.print("# ingest rejected, http "); Serial.println(st);
+    nextSend += k;
+    droppedBatches += k;
+    inflightStart = NO_GROUP;
+  } else {
+    netFailed(st);
   }
 }
