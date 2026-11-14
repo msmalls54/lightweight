@@ -18,6 +18,13 @@ export const heartbeatSchema = z.object({
   rssi: z.number().finite().optional(),
   queue: z.number().int().min(0).optional(),
   fw: z.string().max(32).optional(),
+  // firmware 0.2.0 (coalesced POSTs): delivery stats
+  dropped: z.number().finite().min(0).optional(),
+  post_rtt_ms: z.number().finite().min(0).optional(),
+  post_rtt_max_ms: z.number().finite().min(0).optional(),
+  coalesce_max: z.number().finite().min(0).optional(),
+  posts: z.number().finite().min(0).optional(),
+  batches: z.number().finite().min(0).optional(),
 });
 export type Heartbeat = z.infer<typeof heartbeatSchema>;
 

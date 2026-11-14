@@ -110,7 +110,8 @@ export function trimIngested(b: Batch & { n_batches?: number }, endT: number | n
 export class Pipeline {
   live: Sess | null = null;
   replay: { sess: Sess; source: string; i: number; n: number; stop: boolean; speed: number } | null = null;
-  private batchTimes: number[] = [];
+  /** Receive time + sample count of each stored POST in the last 5 s (a coalesced POST holds several batches). */
+  private batchTimes: { t: number; n: number }[] = [];
   private lastBatchWall = 0;
   private lastHb: (Heartbeat & { at: number }) | null = null;
   private statusTimer = setInterval(() => this.hub.send(this.status()), 1000);
@@ -146,8 +147,8 @@ export class Pipeline {
     const minOffset = !dev || reset ? offset : Math.min(dev.minOffset, offset);
     this.devices.set(b.device, { endT: Math.max(reset || !dev ? endT : dev.endT, endT), minOffset, lagMs: offset - minOffset, at: now });
     this.lastBatchWall = now;
-    this.batchTimes.push(now);
-    while (this.batchTimes.length && this.batchTimes[0] < now - 5000) this.batchTimes.shift();
+    this.batchTimes.push({ t: now, n: b.ch[0].length });
+    while (this.batchTimes.length && this.batchTimes[0].t < now - 5000) this.batchTimes.shift();
     if (!this.replay) this.process(sess, b); // while a replay drives the dashboard, live batches are only stored
     return { duplicate: false, samples: b.ch[0].length };
   }
@@ -649,11 +650,14 @@ export class Pipeline {
       type: "status", now: new Date(now).toISOString(),
       mode: this.replay ? "replay" : "live",
       device: {
-        streaming: now - this.lastBatchWall < 2000,
+        // Coalesced POSTs arrive up to ~1.6 s of data apart (+ RTT): don't flicker to "silent" between them.
+        streaming: now - this.lastBatchWall < 4000,
         last_batch_age_ms: this.lastBatchWall ? now - this.lastBatchWall : null,
         lag_ms: this.deviceLag(now),
-        batches_per_s: Math.round((this.batchTimes.filter(t => t >= now - 5000).length / 5) * 10) / 10,
-        heartbeat: this.lastHb ? { rssi: this.lastHb.rssi ?? null, queue: this.lastHb.queue ?? null, fw: this.lastHb.fw ?? null, uptime_ms: this.lastHb.uptime_ms ?? null, age_ms: now - this.lastHb.at } : null,
+        // 40-sample batch equivalents per second (5.0 = every sample arriving), whatever the POST coalescing.
+        batches_per_s: Math.round((this.batchTimes.filter(x => x.t >= now - 5000).reduce((a, x) => a + x.n, 0) / 5 / 40) * 10) / 10,
+        heartbeat: this.lastHb ? { rssi: this.lastHb.rssi ?? null, queue: this.lastHb.queue ?? null, fw: this.lastHb.fw ?? null, uptime_ms: this.lastHb.uptime_ms ?? null, age_ms: now - this.lastHb.at,
+          dropped: this.lastHb.dropped ?? null, post_rtt_ms: this.lastHb.post_rtt_ms ?? null, post_rtt_max_ms: this.lastHb.post_rtt_max_ms ?? null, coalesce_max: this.lastHb.coalesce_max ?? null } : null,
       },
       session: s ? { id: s.id, person: s.person, walkup: s.isWalkUp, kind: s.kind, arms: s.arms, calibrated: !!s.calibration, cal_source: s.calSource, mvc: s.calibration?.mvc ?? null, calibrating: s.calibrating, cal_problems: s.calibration?.problems ?? [], sets_done: s.sets.length } : null,
       set: s?.set ? { set_id: s.set.set_id, set_no: s.setNo, exercise: s.set.exercise, variant: s.set.variant, load_lb: s.set.load_lb ?? null, arms: s.set.arms } : null,
