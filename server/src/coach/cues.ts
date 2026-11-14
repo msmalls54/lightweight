@@ -1,3 +1,5 @@
+import { DEFAULT_CONFIG } from "../engine/index.js";
+import { thresholdsFor } from "../engine/config.js";
 import type { RepEvent, Variant } from "./types.js";
 
 /** Call-out thresholds (code decides; the voice just says it). */
@@ -5,8 +7,6 @@ export const CUE_CONFIG = {
   /** r_share = R_bi / (R_bi + L_bi). Outside this band = one side slacking (CLAUDE.md: 0.40–0.60). */
   rShareLow: 0.4,
   rShareHigh: 0.6,
-  /** Concentric faster than this = bouncing/jerking it up. */
-  fastUpMs: 400,
   maxCountedRep: 20,
 };
 
@@ -26,7 +26,9 @@ export function pickCue(rep: RepEvent, opts: PickCueOptions = {}): string | null
     if (rep.r_share > CUE_CONFIG.rShareHigh) return "left_slacking";
     if (rep.r_share < CUE_CONFIG.rShareLow) return "right_slacking";
   }
-  if (rep.up_ms > 0 && rep.up_ms < CUE_CONFIG.fastUpMs) return "slow_it_down";
+  // Same "very fast up" definition the engine uses for slow_the_tempo (per variant, default 300 ms).
+  const fastUpMs = thresholdsFor(DEFAULT_CONFIG, opts.variant ?? "standing").fastUpMs;
+  if (rep.up_ms > 0 && rep.up_ms < fastUpMs) return "slow_it_down";
   if (rep.rep >= 1 && rep.rep <= CUE_CONFIG.maxCountedRep) return `rep_${rep.rep}`;
   return "clean_rep";
 }

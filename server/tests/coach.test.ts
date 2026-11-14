@@ -59,6 +59,7 @@ test("pickCue: imbalance, tempo, count", () => {
   assert.equal(pickCue(rep({ r_share: 0.3 })), "right_slacking");
   assert.equal(pickCue(rep({ r_share: 0.5 })), "rep_3");
   assert.equal(pickCue(rep({ up_ms: 250 })), "slow_it_down");
+  assert.equal(pickCue(rep({ up_ms: 350 })), "rep_3"); // engine fastUpMs = 300
   assert.equal(pickCue(rep({ rep: 1 })), "rep_1");
   assert.equal(pickCue(rep({ rep: 20 })), "rep_20");
   assert.equal(pickCue(rep({ rep: 21 })), "clean_rep");
