@@ -58,6 +58,7 @@ function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {
     },
     fetch: async (url: string, init?: { body?: string }) => {
       if (url === "/voice/clips") return { ok: true, json: async () => ({ keys: ["set_done", "two_cheats", "rep_1", "nice_set"] }) };
+      if (url.includes("/voice/clip/missing_clip")) return { ok: false, status: 503 };
       if (url.startsWith("/voice/clip/")) return { ok: true, arrayBuffer: async () => ({ clip: url }) };
       if (url === "/voice/say") {
         sayBodies.push(JSON.parse(init?.body ?? "{}").text);
@@ -330,4 +331,14 @@ test("a chosen output device: the browser voice can't be routed there, so text o
   await sleep(400);
   assert.deepEqual(log, []);
   assert.ok(events.includes("no_route:browser:say"));
+});
+
+
+test("a missing clip in a sequence is skipped; the rest still plays", async () => {
+  const { A, log, events } = load();
+  await A.ready;
+  assert.equal(await A.playClip(["set_done", "missing_clip"]), true);
+  assert.deepEqual(log, ["play:set_done"]);
+  assert.ok(events.includes("missing:missing_clip"));
+  assert.equal(await A.playClip(["missing_clip"]), false);
 });

@@ -388,9 +388,21 @@
         emit("drop", what);
         return Promise.resolve(false);
       }
-      var bufsP = Promise.all(keys.map(loadClip));
+      // A missing clip (e.g. TTS was down when it should have been generated) is skipped, not fatal:
+      // "Set's done." still plays even if the clip after it isn't cached yet.
+      var bufsP = Promise.all(
+        keys.map(function (k) {
+          return loadClip(k).catch(function () {
+            emit("missing", k);
+            return null;
+          });
+        }),
+      ).then(function (b) {
+        return b.filter(Boolean);
+      });
       return enqueue(function () {
         return bufsP.then(function (bufs) {
+          if (!bufs.length) return false;
           return voice(bufs, what).then(function () {
             return true;
           });

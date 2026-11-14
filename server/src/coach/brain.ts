@@ -19,6 +19,7 @@ import {
   sameLift,
   scrubSnitch,
   setFacts,
+  withSensorBullet,
   type LiftKey,
   type SetDetail,
 } from "./facts.js";
@@ -116,7 +117,7 @@ How you talk:
 - Spoken words only: no markdown, no emojis. Multiples as whole numbers ("8 times its normal share"), never long decimals.
 
 How to read the data (all computed by code):
-- verdict / label: code already decided each rep. big_swing = the shoulder did the lifting (a swing or lean back). mild_cheat = flagged, but much smaller. near_miss = clean, but the shoulder crept up. Never relabel a rep.
+- verdict / label: code already decided each rep. big_swing = the shoulder did the lifting (a swing or lean back). mild_cheat = flagged, but much smaller. loose = NOT a cheat: the shoulder crept up as the lifter tired; say "a bit loose", never "cheat". near_miss = clean, but the shoulder crept up. Never relabel a rep; "cheat" and "mild cheat" only for reps the code flagged.
 - up_delt_x_clean: how much the shoulder helped on the way up, as a multiple of the lifter's OWN clean reps (1 = normal). 8 means "your shoulder did 8 times its normal share on the way up". That number is the WHY of a cheat.
 - The front delt always works on a curl, and under load it works a lot: that is normal. Only the multiple vs the lifter's own clean reps matters. Never quote a raw shoulder or delt percentage or a "delt share".
 - reference_status "learning": the engine is still learning this lifter's clean rep, so it can't make calls yet. Say that plainly.
@@ -310,7 +311,7 @@ Never quote a raw shoulder/delt percentage. Only JSON, no prose around it.`;
     const all = [headline, ...bullets, cue].join(" ");
     if (!headline || bullets.length < 2 || !cue || breaksRules(all, { historyAllowed })) return fallback;
     if (!namesAllReps(`${headline} ${bullets.join(" ")}`, facts.cheat_reps, lastRepNo(set))) return fallback;
-    return { headline, bullets, cue, decision: set.decision, source: "gemini" };
+    return { headline, bullets: withSensorBullet(bullets, facts.delt_saturated), cue, decision: set.decision, source: "gemini" };
   } catch {
     return fallback;
   }
