@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 .mcp-use/
+.cache/
 *.log
 
 # secrets
@@ -24,3 +25,4 @@ firmware/**/build/
 Thumbs.db
 .vscode/
 .idea/
+firmware/**/arduino_secrets.h
