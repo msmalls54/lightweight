@@ -1,0 +1,676 @@
+{
+ "_note": "Real live session Nov 14 12:25, read-only export from data/lightweight.sqlite. Mike: set 1 reps 4 and 8 were intended swings; rep 5 'kind of activated because I was going fast'.",
+ "session_id": "s-1114-122526-r82",
+ "sets": [
+  {
+   "set_no": 1,
+   "ctx": {
+    "session_id": "s-1114-122526-r82",
+    "set_id": "set-1114-122531-pmo",
+    "person": "Mike",
+    "exercise": "dumbbell curl",
+    "variant": "standing",
+    "load_lb": 35,
+    "arms": [
+     "R",
+     "L"
+    ]
+   },
+   "set_end": {
+    "type": "set_end",
+    "set_id": "set-1114-122531-pmo",
+    "reps": [
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "L",
+      "rep": 1,
+      "start_ms": 1656435,
+      "end_ms": 1657970,
+      "peak_pct": [
+       1.187,
+       0.112,
+       1.003,
+       0.268
+      ],
+      "mean_pct": [
+       0.585,
+       0.075,
+       0.765,
+       0.163
+      ],
+      "delt_share": 0.176,
+      "baseline_delt_share": null,
+      "up_delt_ratio": 0.275,
+      "baseline_up_delt_ratio": null,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.433,
+      "up_ms": 505,
+      "down_ms": 120
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "L",
+      "rep": 2,
+      "start_ms": 1659255,
+      "end_ms": 1660480,
+      "peak_pct": [
+       1.252,
+       0.127,
+       1.002,
+       0.308
+      ],
+      "mean_pct": [
+       0.569,
+       0.074,
+       0.813,
+       0.199
+      ],
+      "delt_share": 0.196,
+      "baseline_delt_share": null,
+      "up_delt_ratio": 0.23,
+      "baseline_up_delt_ratio": null,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.412,
+      "up_ms": 390,
+      "down_ms": 100
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "L",
+      "rep": 3,
+      "start_ms": 1661715,
+      "end_ms": 1662910,
+      "peak_pct": [
+       1.192,
+       0.102,
+       1.001,
+       0.21
+      ],
+      "mean_pct": [
+       0.432,
+       0.057,
+       0.634,
+       0.107
+      ],
+      "delt_share": 0.144,
+      "baseline_delt_share": 0.196,
+      "up_delt_ratio": 0.167,
+      "baseline_up_delt_ratio": 0.275,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.406,
+      "up_ms": 630,
+      "down_ms": 160
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "R",
+      "rep": 4,
+      "start_ms": 1667545,
+      "end_ms": 1668285,
+      "peak_pct": [
+       1.178,
+       1.042,
+       0.773,
+       0.592
+      ],
+      "mean_pct": [
+       0.606,
+       0.799,
+       0.396,
+       0.42
+      ],
+      "delt_share": 0.569,
+      "baseline_delt_share": 0.115,
+      "up_delt_ratio": 1.37,
+      "baseline_up_delt_ratio": 0.159,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.605,
+      "up_ms": 435,
+      "down_ms": 195
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "R",
+      "rep": 5,
+      "start_ms": 1670145,
+      "end_ms": 1671020,
+      "peak_pct": [
+       0.461,
+       0.109,
+       0.991,
+       0.22
+      ],
+      "mean_pct": [
+       0.242,
+       0.078,
+       0.58,
+       0.142
+      ],
+      "delt_share": 0.245,
+      "baseline_delt_share": 0.115,
+      "up_delt_ratio": 0.356,
+      "baseline_up_delt_ratio": 0.159,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.294,
+      "up_ms": 510,
+      "down_ms": 200
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "L",
+      "rep": 6,
+      "start_ms": 1672945,
+      "end_ms": 1674090,
+      "peak_pct": [
+       0.697,
+       0.107,
+       0.909,
+       0.2
+      ],
+      "mean_pct": [
+       0.362,
+       0.072,
+       0.644,
+       0.151
+      ],
+      "delt_share": 0.19,
+      "baseline_delt_share": 0.196,
+      "up_delt_ratio": 0.248,
+      "baseline_up_delt_ratio": 0.275,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.36,
+      "up_ms": 470,
+      "down_ms": 315
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "L",
+      "rep": 7,
+      "start_ms": 1675620,
+      "end_ms": 1676675,
+      "peak_pct": [
+       0.945,
+       0.087,
+       1.002,
+       0.216
+      ],
+      "mean_pct": [
+       0.363,
+       0.051,
+       0.644,
+       0.119
+      ],
+      "delt_share": 0.155,
+      "baseline_delt_share": 0.196,
+      "up_delt_ratio": 0.188,
+      "baseline_up_delt_ratio": 0.275,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.36,
+      "up_ms": 590,
+      "down_ms": 120
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "R",
+      "rep": 8,
+      "start_ms": 1678375,
+      "end_ms": 1679200,
+      "peak_pct": [
+       1.254,
+       1.041,
+       0.999,
+       0.588
+      ],
+      "mean_pct": [
+       0.635,
+       0.802,
+       0.539,
+       0.385
+      ],
+      "delt_share": 0.558,
+      "baseline_delt_share": 0.115,
+      "up_delt_ratio": 1.169,
+      "baseline_up_delt_ratio": 0.159,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.541,
+      "up_ms": 470,
+      "down_ms": 130
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "R",
+      "rep": 9,
+      "start_ms": 1681065,
+      "end_ms": 1681715,
+      "peak_pct": [
+       0.377,
+       0.057,
+       0.639,
+       0.072
+      ],
+      "mean_pct": [
+       0.203,
+       0.041,
+       0.358,
+       0.051
+      ],
+      "delt_share": 0.167,
+      "baseline_delt_share": 0.115,
+      "up_delt_ratio": 0.265,
+      "baseline_up_delt_ratio": 0.159,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.363,
+      "up_ms": 355,
+      "down_ms": 165
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122531-pmo",
+      "arm": "L",
+      "rep": 10,
+      "start_ms": 1683480,
+      "end_ms": 1684255,
+      "peak_pct": [
+       0.83,
+       0.086,
+       1.003,
+       0.201
+      ],
+      "mean_pct": [
+       0.362,
+       0.051,
+       0.726,
+       0.116
+      ],
+      "delt_share": 0.138,
+      "baseline_delt_share": 0.196,
+      "up_delt_ratio": 0.142,
+      "baseline_up_delt_ratio": 0.275,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.333,
+      "up_ms": 315,
+      "down_ms": 125
+     }
+    ],
+    "clean": 7,
+    "cheats": 3,
+    "first_cheat_rep": 4,
+    "decision": {
+     "next": "stop_at_first_cheat_rest_longer",
+     "reason": "3 cheat reps (first at rep 4); the plan allows 1 cheat rep. Next set, stop at the first cheat and rest longer. Same weight."
+    },
+    "calibration": {
+     "rest": [
+      544,
+      477,
+      735,
+      581
+     ],
+     "mvc": [
+      14240,
+      14303,
+      14898,
+      12969
+     ],
+     "ok": true,
+     "problems": []
+    }
+   },
+   "coach_line_at_the_time": "7 clean reps out of 10, but the snitch took over at rep 4 and you racked up 3 cheats. Next set, stop at the first cheat and rest longer, same weight."
+  },
+  {
+   "set_no": 2,
+   "ctx": {
+    "session_id": "s-1114-122526-r82",
+    "set_id": "set-1114-122952-gkd",
+    "person": "Mike",
+    "exercise": "dumbbell curl",
+    "variant": "standing",
+    "load_lb": 35,
+    "arms": [
+     "R",
+     "L"
+    ]
+   },
+   "set_end": {
+    "type": "set_end",
+    "set_id": "set-1114-122952-gkd",
+    "reps": [
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "L",
+      "rep": 1,
+      "start_ms": 1917680,
+      "end_ms": 1918310,
+      "peak_pct": [
+       0.237,
+       0.05,
+       0.419,
+       0.06
+      ],
+      "mean_pct": [
+       0.145,
+       0.038,
+       0.304,
+       0.045
+      ],
+      "delt_share": 0.128,
+      "baseline_delt_share": 0.197,
+      "up_delt_ratio": 0.181,
+      "baseline_up_delt_ratio": 0.276,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.323,
+      "up_ms": 255,
+      "down_ms": 315
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "L",
+      "rep": 2,
+      "start_ms": 1919820,
+      "end_ms": 1920570,
+      "peak_pct": [
+       0.341,
+       0.069,
+       0.5,
+       0.083
+      ],
+      "mean_pct": [
+       0.155,
+       0.038,
+       0.348,
+       0.048
+      ],
+      "delt_share": 0.121,
+      "baseline_delt_share": 0.197,
+      "up_delt_ratio": 0.165,
+      "baseline_up_delt_ratio": 0.276,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.308,
+      "up_ms": 340,
+      "down_ms": 175
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "L",
+      "rep": 3,
+      "start_ms": 1921735,
+      "end_ms": 1922830,
+      "peak_pct": [
+       1.052,
+       0.187,
+       1.001,
+       0.27
+      ],
+      "mean_pct": [
+       0.708,
+       0.103,
+       0.796,
+       0.137
+      ],
+      "delt_share": 0.146,
+      "baseline_delt_share": 0.128,
+      "up_delt_ratio": 0.1,
+      "baseline_up_delt_ratio": 0.181,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.47,
+      "up_ms": 305,
+      "down_ms": 180
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "L",
+      "rep": 4,
+      "start_ms": 1924110,
+      "end_ms": 1925170,
+      "peak_pct": [
+       1.052,
+       0.203,
+       1.002,
+       0.28
+      ],
+      "mean_pct": [
+       0.723,
+       0.097,
+       0.824,
+       0.146
+      ],
+      "delt_share": 0.15,
+      "baseline_delt_share": 0.128,
+      "up_delt_ratio": 0.139,
+      "baseline_up_delt_ratio": 0.181,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.467,
+      "up_ms": 260,
+      "down_ms": 130
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "L",
+      "rep": 5,
+      "start_ms": 1926575,
+      "end_ms": 1927360,
+      "peak_pct": [
+       1.051,
+       0.161,
+       0.999,
+       0.149
+      ],
+      "mean_pct": [
+       0.696,
+       0.075,
+       0.607,
+       0.075
+      ],
+      "delt_share": 0.11,
+      "baseline_delt_share": 0.128,
+      "up_delt_ratio": 0.124,
+      "baseline_up_delt_ratio": 0.181,
+      "cheat": false,
+      "cheat_reason": null,
+      "r_share": 0.534,
+      "up_ms": 395,
+      "down_ms": 140
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "R",
+      "rep": 6,
+      "start_ms": 1928310,
+      "end_ms": 1929085,
+      "peak_pct": [
+       1.05,
+       1.041,
+       0.994,
+       0.436
+      ],
+      "mean_pct": [
+       0.608,
+       0.74,
+       0.554,
+       0.294
+      ],
+      "delt_share": 0.549,
+      "baseline_delt_share": 0.127,
+      "up_delt_ratio": 1.312,
+      "baseline_up_delt_ratio": 0.109,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.523,
+      "up_ms": 400,
+      "down_ms": 140
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "R",
+      "rep": 7,
+      "start_ms": 1930625,
+      "end_ms": 1931295,
+      "peak_pct": [
+       1.05,
+       0.968,
+       0.976,
+       0.756
+      ],
+      "mean_pct": [
+       0.671,
+       0.772,
+       0.539,
+       0.416
+      ],
+      "delt_share": 0.535,
+      "baseline_delt_share": 0.127,
+      "up_delt_ratio": 1.332,
+      "baseline_up_delt_ratio": 0.109,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.555,
+      "up_ms": 290,
+      "down_ms": 130
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "R",
+      "rep": 8,
+      "start_ms": 1932670,
+      "end_ms": 1933420,
+      "peak_pct": [
+       1.051,
+       1.04,
+       0.985,
+       0.415
+      ],
+      "mean_pct": [
+       0.695,
+       0.755,
+       0.514,
+       0.313
+      ],
+      "delt_share": 0.521,
+      "baseline_delt_share": 0.127,
+      "up_delt_ratio": 1.136,
+      "baseline_up_delt_ratio": 0.109,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.575,
+      "up_ms": 335,
+      "down_ms": 120
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "R",
+      "rep": 9,
+      "start_ms": 1934565,
+      "end_ms": 1935385,
+      "peak_pct": [
+       1.049,
+       0.856,
+       0.997,
+       0.47
+      ],
+      "mean_pct": [
+       0.511,
+       0.544,
+       0.541,
+       0.273
+      ],
+      "delt_share": 0.515,
+      "baseline_delt_share": 0.127,
+      "up_delt_ratio": 1.094,
+      "baseline_up_delt_ratio": 0.109,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.486,
+      "up_ms": 500,
+      "down_ms": 115
+     },
+     {
+      "type": "rep",
+      "set_id": "set-1114-122952-gkd",
+      "arm": "R",
+      "rep": 10,
+      "start_ms": 1936450,
+      "end_ms": 1937375,
+      "peak_pct": [
+       1.052,
+       0.667,
+       1,
+       0.338
+      ],
+      "mean_pct": [
+       0.627,
+       0.44,
+       0.504,
+       0.178
+      ],
+      "delt_share": 0.413,
+      "baseline_delt_share": 0.127,
+      "up_delt_ratio": 0.827,
+      "baseline_up_delt_ratio": 0.109,
+      "cheat": true,
+      "cheat_reason": "delt_share_jump",
+      "r_share": 0.554,
+      "up_ms": 450,
+      "down_ms": 125
+     }
+    ],
+    "clean": 5,
+    "cheats": 5,
+    "first_cheat_rep": 6,
+    "decision": {
+     "next": "stop_at_first_cheat_rest_longer",
+     "reason": "5 cheat reps (first at rep 6); the plan allows 1 cheat rep. Next set, stop at the first cheat and rest longer. Same weight."
+    },
+    "calibration": {
+     "rest": [
+      571,
+      477,
+      735,
+      581
+     ],
+     "mvc": [
+      14946,
+      14598,
+      14915,
+      12969
+     ],
+     "ok": true,
+     "problems": []
+    }
+   },
+   "coach_line_at_the_time": "Five clean reps, then the snitch took over at rep six for five straight cheats at 51 percent delt share. Next set, stop at the first cheat and rest longer, same weight."
+  }
+ ]
+}
