@@ -66,6 +66,27 @@ test("/ingest: coalesced POSTs up to 400 samples, a repeated or overlapping POST
   assert.ok(live[live.length - 1] >= 10_000 + 3000 * DT);
 
   // Header lag: the device's newest sample vs receive time, relative to the best seen (all sent at once here).
-  const st = pipeline.status() as { device: { lag_ms: number | null } };
+  const st = pipeline.status() as { device: { lag_ms: number | null; batches_per_s: number; streaming: boolean } };
   assert.equal(typeof st.device.lag_ms, "number");
+  // Rate counts samples, not POSTs: 3040 samples in the 5 s window = 76 batches of 40 = 15.2/s.
+  assert.equal(st.device.batches_per_s, 15.2);
+  assert.equal(st.device.streaming, true);
+});
+
+test("/heartbeat: firmware 0.2.0 delivery stats are accepted and shown in status", async () => {
+  const store = new Store(":memory:");
+  const hub = new Hub();
+  hub.send = () => {};
+  const pipeline = new Pipeline(store, hub);
+  const app = new Hono();
+  addGuard(app);
+  addReceiver(app, pipeline);
+  const hb = { device: "lw-uno-test", uptime_ms: 120000, rssi: -24, queue: 3, fw: "0.2.0", dropped: 0, post_rtt_ms: 140, post_rtt_max_ms: 610, coalesce_max: 8, posts: 300, batches: 1500 };
+  const r = await app.request("/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(hb) });
+  assert.equal(r.status, 200);
+  const bad = await app.request("/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...hb, post_rtt_ms: -1 }) });
+  assert.equal(bad.status, 400);
+  const h = (pipeline.status() as { device: { heartbeat: Record<string, unknown> } }).device.heartbeat;
+  assert.deepEqual({ dropped: h.dropped, post_rtt_ms: h.post_rtt_ms, post_rtt_max_ms: h.post_rtt_max_ms, coalesce_max: h.coalesce_max, fw: h.fw },
+    { dropped: 0, post_rtt_ms: 140, post_rtt_max_ms: 610, coalesce_max: 8, fw: "0.2.0" });
 });
