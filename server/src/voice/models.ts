@@ -14,8 +14,8 @@ export const TTS_FALLBACK_MODELS = ["gemini-3.8-flash-tts"];
 /** TTS only works through `ai.interactions.create` on v1beta (generateContent rejects speechConfig). */
 export const TTS_API_VERSION = "v1beta";
 
-/** Prebuilt voice. Algenib = "Gravelly": sounds most like a gym coach. Others: Orus/Alnilam/Kore = "Firm". */
-export const VOICE_NAME = "Algenib";
+/** Prebuilt voice. Mike picked Alnilam ("Firm", quickest delivery) on Nov 14. Others: Algenib = "Gravelly", Orus/Kore = "Firm". */
+export const VOICE_NAME = "Alnilam";
 /**
  * Hook for a custom/replicated voice later: set this (or env LW_VOICE_ID) to a stored voice
  * name and it is sent instead of VOICE_NAME.
