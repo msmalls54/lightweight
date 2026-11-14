@@ -462,6 +462,7 @@
   }
   const cuePlayed = new Map(); // "set:rep" -> {cheat, arms}
   function onRep(r, fresh) {
+    if (fresh) hideSetIdle();
     if (r.set_id !== currentSetId) { currentSetId = r.set_id; setState = newSet(); if (fresh) setSaturatedHint([]); }
     setState.set_no = r.set_no ?? setState.set_no;
     setState.reps.set(r.rep, !!(setState.reps.get(r.rep) || r.cheat));
@@ -486,6 +487,7 @@
     if (cuePlayed.size > 200) cuePlayed.delete(cuePlayed.keys().next().value);
   }
   function onSetEnd(e) {
+    hideSetIdle();
     setSaturatedHint(e.delt_saturated);
     if (e.too_short) {
       addFeed(`<span class="v none"></span><span class="t">Set ${e.set_no ?? ""} done · ${e.n_reps} rep${e.n_reps === 1 ? "" : "s"}</span><span class="x"></span><span class="w none">Too short</span>`, "setend");
@@ -532,6 +534,29 @@
     return ` · MVC biceps R ${k(mvc[0])} / L ${k(mvc[2])}${lop(mvc[0], mvc[2])} · delt R ${k(mvc[1])} / L ${k(mvc[3])}${lop(mvc[1], mvc[3])}`;
   }
   let quietSynced = false;
+  // Device lag (receive time - device time, vs the session's best): amber over 1 s, red over 3 s.
+  function renderLag(ms) {
+    const el = $("lagText");
+    if (ms == null) { el.textContent = ""; el.className = ""; return; }
+    el.textContent = `lag ${(ms / 1000).toFixed(1)} s`;
+    el.className = ms > 3000 ? "bad" : ms > 1000 ? "warn" : "";
+    el.title = "How far the sensor data is behind real time";
+  }
+  // "Set ends in N s": shown once 8 s pass without a rep; a new rep or the set's end hides it.
+  let idleHideT = null;
+  function onSetIdle(e) {
+    const el = $("setEnds");
+    const left = Math.ceil(e.ends_in_ms / 1000);
+    el.querySelector(".n").textContent = String(Math.max(0, left));
+    el.querySelector(".n2").textContent = `${Math.max(0, left)} s`;
+    const total = Math.max(1, e.idle_ms + e.ends_in_ms - 8000);
+    el.querySelector(".arc").style.strokeDashoffset = String(100 - Math.max(0, Math.min(100, (e.ends_in_ms / total) * 100)));
+    el.classList.remove("hidden");
+    clearTimeout(idleHideT);
+    idleHideT = setTimeout(hideSetIdle, 2500); // no more ticks (device paused, set ended): don't linger
+  }
+  function hideSetIdle() { clearTimeout(idleHideT); $("setEnds").classList.add("hidden"); }
+
   function onStatus(s) {
     lastStatus = s;
     if (!quietSynced) { // first status: a remembered Quiet mode survives server restarts
@@ -550,6 +575,7 @@
     $("devDot").className = `dot ${d.streaming ? "on" : d.last_batch_age_ms == null ? "" : "off"}`;
     $("devText").textContent = d.streaming ? `Streaming · ${d.batches_per_s.toFixed(1)}/s` : d.last_batch_age_ms == null ? "No device" : `Silent · ${ago(d.last_batch_age_ms)}`;
     const hb = d.heartbeat;
+    renderLag(d.lag_ms);
     $("hbText").textContent = hb ? `RSSI ${hb.rssi ?? "?"}${hb.queue ? ` · queue ${hb.queue}` : ""}${hb.age_ms > 5000 ? ` · heartbeat ${ago(hb.age_ms)}` : ""}` : "No heartbeat";
     const m = $("mode");
     m.textContent = s.mode === "replay" ? `Replay ${s.replay ? `${Math.round((s.replay.i / s.replay.n) * 100)}%` : ""}` : "Live";
@@ -955,6 +981,7 @@
       switch (e.type) {
         case "live": live = e.pct; liveAt = performance.now(); onLiveForMap(e.pct); break;
         case "status": onStatus(e); break;
+        case "set_idle": onSetIdle(e); break;
         case "hello": clientId = e.client_id; break;
         case "speaker": if (isSpeaker !== !!e.you) dbg("speaker", e.you ? "this tab" : "other tab"); isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; syncVoice(); renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
         case "quiet": applyQuiet(e.on); break;

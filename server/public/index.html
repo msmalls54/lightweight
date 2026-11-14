@@ -105,6 +105,11 @@
   #heroStart { display: none !important; }
 
   /* body stage: person's right arm meter | figure | person's left arm meter */
+  #setEnds { position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 10px; padding: 6px 14px 6px 8px; border-radius: 999px; background: rgba(23, 26, 31, .92); border: 1px solid rgba(245, 158, 11, .5); color: var(--text); font-size: var(--fs-s); white-space: nowrap; }
+  #setEnds.hidden { display: none; }
+  #setEnds .arc { transition: stroke-dashoffset .3s linear; }
+  #lagText { margin-left: 10px; font-variant-numeric: tabular-nums; }
+  #lagText.warn { color: var(--warn); font-weight: 600; } #lagText.bad { color: var(--bad); font-weight: 600; }
   #stage { position: relative; min-height: 0; display: grid; grid-template-columns: minmax(96px, .55fr) minmax(0, 1.4fr) minmax(96px, .55fr); align-items: center; gap: var(--s2); }
   #meters { display: contents; }
   #map { grid-column: 2; grid-row: 1; height: 100%; min-height: 0; display: flex; }
@@ -268,7 +273,7 @@
   <div class="status">
     <span id="mode">Live</span><span class="sep"></span>
     <span><span class="dot" id="devDot"></span><span id="devText">No device</span></span><span class="sep"></span>
-    <span id="hbText">No heartbeat</span>
+    <span id="hbText">No heartbeat</span><span id="lagText"></span>
     <span id="sseWrap"><span class="sep"></span><span class="dot" id="sseDot"></span><span id="sseText">Connecting</span></span>
     <span class="sep"></span><span id="spk" role="button" tabindex="0">Voice</span>
     <span id="micWrap" class="hidden"><span class="sep"></span><span id="mic"></span></span>
@@ -296,6 +301,7 @@
       <button id="heroStart" class="primary">Start set</button>
     </div>
     <div id="stage">
+      <div id="setEnds" class="hidden" role="status" aria-live="polite"><svg viewBox="0 0 36 36" width="44" height="44"><circle cx="18" cy="18" r="15.9" fill="none" stroke="#2C333C" stroke-width="3"/><circle class="arc" cx="18" cy="18" r="15.9" fill="none" stroke="#F59E0B" stroke-width="3" stroke-linecap="round" pathLength="100" stroke-dasharray="100" transform="rotate(-90 18 18)"/><text class="n" x="18" y="23" text-anchor="middle" font-size="14" font-weight="700" fill="#F59E0B">15</text></svg><span>Set ends in <b class="n2"></b> without a rep</span></div>
       <div id="meters"></div>
       <div id="map"></div>
       <div id="banner"><span id="bannerText"></span></div>
