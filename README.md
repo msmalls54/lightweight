@@ -11,7 +11,7 @@ Demo video: _TODO: link_
 
 - **Feels the lift.** Four MyoWare 2.0 EMG sensors read the left and right **biceps** (the target) and the left and right **front delts** (the cheat check) at 200 Hz.
 - **Catches the swing.** When you swing a curl up, your front delt starts the weight. The signal engine compares each rep's up phase with your own clean reps and flags the cheat ("delt took over").
-- **Calls it out loud.** A voice coach (Gemini TTS, voice *Alnilam*) says "Rep six. Your delt took over." over your music, ducking the music while it talks. Call-outs are pre-generated clips, so there's no waiting on an API mid-set.
+- **A voice coach in your speaker or earbuds.** The coach (Gemini TTS, voice *Alnilam*) talks through any Bluetooth speaker or earbuds paired to the laptop (we used a Skullcandy Ounce+ clipped to a tank strap), ducking your music: "Rep six. Your delt took over." Call-outs are pre-generated clips, so they're instant mid-set. Voice commands ("start set", "stop", "how's my workout") keep it hands-free: private coaching in your ears, no screen needed. Today the laptop stands in for a phone: the voice commands use the laptop's mic (a Bluetooth headset mic would force low-quality call audio), and there's no phone app yet.
 - **Knows you.** A coach brain (**Gemini 4 Hydrogen**) gets one context packet: your profile, your plan (35 lb stays 35 lb; progress means more clean reps), today's sets and your last session. After each set it gives a one or two sentence summary.
 - **Lets Claude see your body.** An MCP server (mcp-use) exposes your reps, sets, L/R balance and history as tools, plus a **muscle-map widget**: a front-body map with the four sensed muscles shaded by effort and a per-rep scrubber.
 
