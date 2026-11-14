@@ -307,7 +307,9 @@ export class Engine {
     // straight on still counts once the gap has passed, a brief rebound doesn't.
     // A new rep must also rise restartRise above the valley, so a tail lingering near the end
     // level (or an MVC set too low, which lifts the valleys) doesn't start a fake rep.
-    const startLevel = Math.max(th.hi, s.valley + th.restartRise);
+    // Only after a rep: at set start there is no tail, and a lifter who curls the moment the set is
+    // armed must still get rep 1 (live sets r82 and zdw lost it).
+    const startLevel = s.lastRepEndT === null ? th.hi : Math.max(th.hi, s.valley + th.restartRise);
     if (sig >= startLevel && (s.lastRepEndT === null || x.t - s.lastRepEndT >= th.minGapMs)) {
       s.phase = "rep";
       s.rep = s.pre;

@@ -1,0 +1,240 @@
+{
+  "n_real": 40,
+  "recordings": [
+    "2026-11-13-bench",
+    "2026-11-14-right-35lb-strict-vs-swing",
+    "2026-11-14-fulltest-35lb-bilateral",
+    "live:s-1114-122526-r82",
+    "live:s-1114-123449-zdw"
+  ],
+  "features": [
+    "up_delt_ratio",
+    "delt_share",
+    "delt_peak",
+    "delt_mean",
+    "biceps_peak",
+    "biceps_mean",
+    "up_s",
+    "duration_s"
+  ],
+  "pooled": {
+    "engine_flag (fixed rules)": {
+      "n": 40,
+      "acc": "0.90",
+      "precision": "1.00",
+      "recall": "0.73",
+      "confusion": "TP 11 FP 0 TN 25 FN 4"
+    },
+    "logistic regression": {
+      "n": 40,
+      "acc": "0.95",
+      "precision": "1.00",
+      "recall": "0.87",
+      "confusion": "TP 13 FP 0 TN 25 FN 2"
+    },
+    "decision stump": {
+      "n": 40,
+      "acc": "0.72",
+      "precision": "0.61",
+      "recall": "0.73",
+      "confusion": "TP 11 FP 7 TN 18 FN 4"
+    },
+    "majority class": {
+      "n": 40,
+      "acc": "0.63",
+      "precision": "n/a",
+      "recall": "0.00",
+      "confusion": "TP 0 FP 0 TN 25 FN 15"
+    }
+  },
+  "per_fold": [
+    {
+      "recording": "2026-11-13-bench",
+      "n": 7,
+      "swing": 4,
+      "results": {
+        "engine_flag (fixed rules)": {
+          "n": 7,
+          "acc": "0.57",
+          "precision": "1.00",
+          "recall": "0.25",
+          "confusion": "TP 1 FP 0 TN 3 FN 3"
+        },
+        "logistic regression": {
+          "n": 7,
+          "acc": "0.86",
+          "precision": "1.00",
+          "recall": "0.75",
+          "confusion": "TP 3 FP 0 TN 3 FN 1"
+        },
+        "decision stump": {
+          "n": 7,
+          "acc": "0.71",
+          "precision": "1.00",
+          "recall": "0.50",
+          "confusion": "TP 2 FP 0 TN 3 FN 2"
+        },
+        "majority class": {
+          "n": 7,
+          "acc": "0.43",
+          "precision": "n/a",
+          "recall": "0.00",
+          "confusion": "TP 0 FP 0 TN 3 FN 4"
+        }
+      },
+      "stump": "delt_mean > 0.562"
+    },
+    {
+      "recording": "2026-11-14-right-35lb-strict-vs-swing",
+      "n": 8,
+      "swing": 3,
+      "results": {
+        "engine_flag (fixed rules)": {
+          "n": 8,
+          "acc": "1.00",
+          "precision": "1.00",
+          "recall": "1.00",
+          "confusion": "TP 3 FP 0 TN 5 FN 0"
+        },
+        "logistic regression": {
+          "n": 8,
+          "acc": "1.00",
+          "precision": "1.00",
+          "recall": "1.00",
+          "confusion": "TP 3 FP 0 TN 5 FN 0"
+        },
+        "decision stump": {
+          "n": 8,
+          "acc": "0.75",
+          "precision": "1.00",
+          "recall": "0.33",
+          "confusion": "TP 1 FP 0 TN 5 FN 2"
+        },
+        "majority class": {
+          "n": 8,
+          "acc": "0.63",
+          "precision": "n/a",
+          "recall": "0.00",
+          "confusion": "TP 0 FP 0 TN 5 FN 3"
+        }
+      },
+      "stump": "delt_share > 0.527"
+    },
+    {
+      "recording": "2026-11-14-fulltest-35lb-bilateral",
+      "n": 13,
+      "swing": 6,
+      "results": {
+        "engine_flag (fixed rules)": {
+          "n": 13,
+          "acc": "0.92",
+          "precision": "1.00",
+          "recall": "0.83",
+          "confusion": "TP 5 FP 0 TN 7 FN 1"
+        },
+        "logistic regression": {
+          "n": 13,
+          "acc": "0.92",
+          "precision": "1.00",
+          "recall": "0.83",
+          "confusion": "TP 5 FP 0 TN 7 FN 1"
+        },
+        "decision stump": {
+          "n": 13,
+          "acc": "0.54",
+          "precision": "0.50",
+          "recall": "1.00",
+          "confusion": "TP 6 FP 6 TN 1 FN 0"
+        },
+        "majority class": {
+          "n": 13,
+          "acc": "0.54",
+          "precision": "n/a",
+          "recall": "0.00",
+          "confusion": "TP 0 FP 0 TN 7 FN 6"
+        }
+      },
+      "stump": "up_delt_ratio > 0.832"
+    },
+    {
+      "recording": "live:s-1114-122526-r82",
+      "n": 9,
+      "swing": 2,
+      "results": {
+        "engine_flag (fixed rules)": {
+          "n": 9,
+          "acc": "1.00",
+          "precision": "1.00",
+          "recall": "1.00",
+          "confusion": "TP 2 FP 0 TN 7 FN 0"
+        },
+        "logistic regression": {
+          "n": 9,
+          "acc": "1.00",
+          "precision": "1.00",
+          "recall": "1.00",
+          "confusion": "TP 2 FP 0 TN 7 FN 0"
+        },
+        "decision stump": {
+          "n": 9,
+          "acc": "1.00",
+          "precision": "1.00",
+          "recall": "1.00",
+          "confusion": "TP 2 FP 0 TN 7 FN 0"
+        },
+        "majority class": {
+          "n": 9,
+          "acc": "0.78",
+          "precision": "n/a",
+          "recall": "0.00",
+          "confusion": "TP 0 FP 0 TN 7 FN 2"
+        }
+      },
+      "stump": "delt_peak > 0.962"
+    },
+    {
+      "recording": "live:s-1114-123449-zdw",
+      "n": 3,
+      "swing": 0,
+      "results": {
+        "engine_flag (fixed rules)": {
+          "n": 3,
+          "acc": "1.00",
+          "precision": "n/a",
+          "recall": "n/a",
+          "confusion": "TP 0 FP 0 TN 3 FN 0"
+        },
+        "logistic regression": {
+          "n": 3,
+          "acc": "1.00",
+          "precision": "n/a",
+          "recall": "n/a",
+          "confusion": "TP 0 FP 0 TN 3 FN 0"
+        },
+        "decision stump": {
+          "n": 3,
+          "acc": "0.67",
+          "precision": "0.00",
+          "recall": "n/a",
+          "confusion": "TP 0 FP 1 TN 2 FN 0"
+        },
+        "majority class": {
+          "n": 3,
+          "acc": "1.00",
+          "precision": "n/a",
+          "recall": "n/a",
+          "confusion": "TP 0 FP 0 TN 3 FN 0"
+        }
+      },
+      "stump": "delt_peak > 0.962"
+    }
+  ],
+  "loose": [
+    {
+      "id": "live:s-1114-122526-r82/set1/rep5-R",
+      "engine": true,
+      "logreg": 0.01,
+      "stump": 0
+    }
+  ]
+}
