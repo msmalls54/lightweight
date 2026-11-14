@@ -279,11 +279,22 @@
     for (const b of workout?.blocks || []) for (const it of b.items) if (it.kind === "sensed" && !it.live && it.reps > 0) return { it, b };
     return null;
   }
+  // "Workout so far": ④'s summarizeSession (headline, bullets, focus next); totals from the timeline until it arrives.
+  let wsum = null;
   function renderSoFar() {
     const t = workout?.totals;
-    if (!t || !t.sets) { $("sofar").innerHTML = ""; return; }
     const last = latestFinished();
-    $("sofar").innerHTML = `<div class="tot">${t.sets} set${t.sets === 1 ? "" : "s"} · ${t.reps} reps · ${t.cheats} cheat${t.cheats === 1 ? "" : "s"} today</div>${last?.it.coach_line ? esc(last.it.coach_line) : ""}`;
+    if (wsum && (wsum.totals?.sets || wsum.bullets?.length)) {
+      const tt = wsum.totals || {};
+      $("sofar").innerHTML = `<div class="tot">${tt.sets ?? 0} set${tt.sets === 1 ? "" : "s"} · ${tt.reps ?? 0} reps · ${tt.cheats ?? 0} cheat${tt.cheats === 1 ? "" : "s"}${wsum.source ? ` · <span class="src">${esc(wsum.source)}</span>` : ""}</div>
+        <div class="ws-head">${esc(wsum.headline || "")}</div>
+        <ul class="ws-list">${(wsum.bullets || []).map(b => `<li>${esc(b)}</li>`).join("")}</ul>
+        ${wsum.focus_next ? `<div class="ws-focus"><b>Focus next</b>${esc(wsum.focus_next)}</div>` : ""}`;
+    } else if (t && t.sets) {
+      $("sofar").innerHTML = `<div class="tot">${t.sets} set${t.sets === 1 ? "" : "s"} · ${t.reps} reps · ${t.cheats} cheat${t.cheats === 1 ? "" : "s"} today</div>${last?.it.coach_line ? esc(last.it.coach_line) : ""}`;
+    } else { $("sofar").innerHTML = ""; }
+    $("sofarSpeak").classList.toggle("hidden", !wsum?.spoken);
+    if (!t || !t.sets) return;
     if (!selectedSet && last && !$("report").innerHTML && !$("coach").textContent) {
       const d = details[last.it.set_id] || last.it.detail;
       showReport(`Set ${last.it.set_no} report`, d?.source, last.it.coach_line, d);
@@ -339,7 +350,18 @@
     }
   }
   $("reviewBack").onclick = () => { selectedSet = null; exitReview(); renderTimeline(); const l = latestFinished(); if (l) { const d = details[l.it.set_id] || l.it.detail; showReport(`Set ${l.it.set_no} report`, d?.source, l.it.coach_line, d); } };
+  async function loadWorkoutSummary() {
+    try { const j = await (await fetch("/workout/summary")).json(); if (j.ok) { wsum = j.summary; renderSoFar(); } } catch { /* keep the totals */ }
+  }
+  // Spoken only when asked (button or "how's my workout"), never automatically; silent tabs and Quiet mode stay silent.
+  function speakWorkout() {
+    if (!wsum?.spoken) { toast("No workout summary yet."); return; }
+    if (silent()) { console.info("[say]", wsum.spoken); return; }
+    say(wsum.spoken);
+  }
+  $("sofarSpeak").onclick = speakWorkout;
   loadWorkout();
+  loadWorkoutSummary();
   setInterval(loadWorkout, 15000);
 
   function repHtml(r) {
@@ -612,6 +634,7 @@
   function matchCommand(t) {
     const n = normalizeSpeech(t);
     if (!n) return null;
+    if (/^(how's|hows|how is|how was|how's it|how am i doing on) (my |the |this )?workout( going| so far)?$/.test(n) || /^(workout summary|how am i doing|how's it going)$/.test(n)) return "workout";
     if (/^(start|starts|started|starting)( a| the| my| next| another)? new session$/.test(n) || /^new session$/.test(n)) return "new_session";
     if (/^(start|starts|started|starting)( the| a| my| next| another)?( set)?$/.test(n) || /^(go|let's go|lets go)$/.test(n)) return "start";
     if (/^(stop|stops|stopped|stopping)( the| my| this)?( set)?$/.test(n) || /^(done|i'm done|im done|set done|i am done)$/.test(n)) return "stop";
@@ -642,6 +665,7 @@
       startSet();
     } else if (cmd === "stop") stopSet();
     else if (cmd === "new_session") run(() => post("/session/start", { person: "Mike", walkup: false, arms: arms() }))();
+    else if (cmd === "workout") speakWorkout();
   }
   function ensureRec() {
     if (rec || !SR) return rec;
@@ -697,6 +721,7 @@
         case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
         case "quiet": applyQuiet(e.on); break;
         case "workout": loadWorkoutSoon(100); break;
+        case "workout_summary": wsum = e.summary; renderSoFar(); break;
         case "history":
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet();
           if (staleId) { renderIdle(); break; } // old fake/replay/stale run: don't show its reps

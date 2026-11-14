@@ -66,7 +66,7 @@ export function registerTools(server: MCPServer, store: Store, pipeline: Pipelin
     try {
       if (a.reps !== undefined) {
         const id = store.logLift({ person: pipeline.sessionPerson, exercise: a.exercise, variant: a.variant, load_lb: a.load_lb, sets: a.sets, reps: a.reps, note: a.note });
-        pipeline.notifyWorkout();
+        pipeline.notifyWorkout(pipeline.sessionPerson);
         return object({ ok: true, logged: true, id, note: "Recorded as logged, not sensed." });
       }
       return object({ ok: true, ...pipeline.logExercise({ exercise: a.exercise, variant: a.variant, load_lb: a.load_lb, arms: a.arms }) });

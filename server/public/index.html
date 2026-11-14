@@ -151,6 +151,14 @@
   #coachScroll { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; scrollbar-color: #2C333C transparent; }
   #sofar { font-size: var(--fs-m); line-height: 1.45; color: var(--text); }
   #sofar .tot { color: var(--muted); font-size: var(--fs-s); margin-bottom: 4px; }
+  #sofar .tot .src { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+  #sofar .ws-head { font-weight: 600; margin: 4px 0 6px; }
+  #sofar .ws-list { margin: 0 0 8px; padding-left: 18px; }
+  #sofar .ws-list li { margin: 2px 0; }
+  #sofar .ws-focus { padding: 10px 12px; border-radius: 10px; background: rgba(76, 141, 255, .10); border: 1px solid rgba(76, 141, 255, .35); }
+  #sofar .ws-focus b { display: block; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }
+  #sofarTitle { display: flex; justify-content: space-between; align-items: center; }
+  #sofarSpeak { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px; letter-spacing: 0; text-transform: none; }
   #sofar:empty::before { content: "Today's sets and the coach's take show up here."; color: var(--muted); }
   #reportTitle { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   #reportTitle .src { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--muted); }
@@ -283,7 +291,7 @@
 
   <section class="card" id="coachCard">
     <div id="coachScroll">
-      <div><div class="label" style="margin-bottom:8px">Workout so far</div><div id="sofar"></div></div>
+      <div><div class="label" id="sofarTitle" style="margin-bottom:8px"><span>Workout so far</span><button id="sofarSpeak" class="quiet hidden" title="Read the workout summary aloud (or say &quot;how's my workout&quot;)"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2l3-2.5v9L4.5 10h-2z"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5"/></svg>Read aloud</button></div><div id="sofar"></div></div>
       <div>
         <div class="label" id="reportTitle" style="margin-bottom:8px"><span id="reportName">Set report</span><span class="src" id="reportSrc"></span></div>
         <div id="coach"></div>

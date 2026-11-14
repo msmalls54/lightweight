@@ -75,6 +75,12 @@ export class Store {
       .run(l.person, l.exercise, l.variant, l.load_lb ?? null, l.sets ?? null, l.reps ?? null, l.note ?? null, new Date().toISOString());
     return Number(r.lastInsertRowid);
   }
+  /** Newest finished set today for this person (live, non-walk-up): the workout summary's cache key. */
+  lastSetIdToday(person: string, since: string): string | null {
+    const r = this.db.prepare(`SELECT t.set_id FROM sets t JOIN sessions s ON s.session_id=t.session_id
+      WHERE s.person=? AND s.kind='live' AND s.is_walkup=0 AND t.summary IS NOT NULL AND t.started_at>=? ORDER BY t.started_at DESC LIMIT 1`).get(person, since) as { set_id: string } | undefined;
+    return r?.set_id ?? null;
+  }
   loggedToday(person: string, since: string) {
     return this.db.prepare("SELECT * FROM logged_lifts WHERE person=? AND logged_at>=? ORDER BY logged_at").all(person, since) as
       { id: number; person: string; exercise: string; variant: string; load_lb: number | null; sets: number | null; reps: number | null; note: string | null; logged_at: string }[];
