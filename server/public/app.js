@@ -153,14 +153,27 @@
     const up = r.up_delt_ratio, base = r.baseline_up_delt_ratio;
     return up != null && base != null && base > 0 ? up / base : null;
   }
-  function verdictOf(r) {
+  // The engine's per-arm verdicts win (arm_detail); else its loose flag; else the ratio thresholds.
+  function armVerdicts(r) {
+    if (r.arm_detail) {
+      const out = [];
+      for (const arm of ["R", "L"]) {
+        const d = r.arm_detail[arm];
+        if (!d) continue;
+        const m = d.ref_up_delt_ratio > 0 ? d.up_delt_ratio / d.ref_up_delt_ratio : null;
+        out.push({ arm, v: String(d.verdict).toUpperCase(), m, reason: d.cheat_reason });
+      }
+      if (out.length) return out;
+    }
     const m = repMultiple(r);
-    if (r.cheat) return "CHEAT";
-    if (m != null && m >= 1.2) return "LOOSE";
-    return "CLEAN";
+    return [{ arm: r.arm, v: r.cheat ? "CHEAT" : r.loose || (m != null && m >= 1.2) ? "LOOSE" : "CLEAN", m, reason: r.cheat_reason }];
+  }
+  function verdictOf(r) {
+    const vs = armVerdicts(r).map(a => a.v);
+    return vs.includes("CHEAT") ? "CHEAT" : vs.includes("LOOSE") ? "LOOSE" : "CLEAN";
   }
   const fmtX = m => (m >= 10 ? `${Math.round(m)}×` : `${m.toFixed(1)}×`);
-  const VERDICT_LABEL = { CLEAN: "Clean", LOOSE: "Loose", CHEAT: "Cheat" };
+  const VERDICT_LABEL = { CLEAN: "Clean", LOOSE: "A bit loose", CHEAT: "Cheat" };
   const meters = {};
   for (const arm of ["R", "L"]) {
     const el = document.createElement("div");
@@ -169,7 +182,8 @@
     el.innerHTML = `<div class="side">${arm === "R" ? "Right arm" : "Left arm"}</div>
       <div class="verdict">–</div>
       <div class="vgauge" title="Shoulder help on the way up vs your clean rep (0–2×)"><div class="z zg"></div><div class="z za"></div><div class="z zr"></div><div class="mk" style="display:none"></div></div>
-      <div class="msub">Learning your clean rep</div>`;
+      <div class="msub">Learning your clean rep</div>
+      <div class="msat hidden">Sensor maxed out: move this pad a finger-width toward the outside of the shoulder</div>`;
     $("meters").appendChild(el);
     meters[arm] = el;
   }
@@ -197,10 +211,21 @@
     el.querySelector(".msub").textContent = sub ?? `Rep ${repNo}`;
   }
   function updateMeter(r) {
-    const m = repMultiple(r), v = verdictOf(r);
-    showMeter(r.arm, v, m, r.rep, m == null ? (r.cheat ? `Rep ${r.rep} · obvious swing` : `Rep ${r.rep} · learning (${Math.min(r.rep, 2)} of 2)`) : null);
+    for (const a of armVerdicts(r)) {
+      showMeter(a.arm, a.v, a.m, r.rep, a.m == null ? (a.v === "CHEAT" ? `Rep ${r.rep} · obvious swing` : `Rep ${r.rep} · learning (${Math.min(r.rep, 2)} of 2)`) : null);
+    }
+  }
+  function setSaturatedHint(arms) {
+    for (const arm of ["R", "L"]) meters[arm].querySelector(".msat").classList.toggle("hidden", !(arms || []).includes(arm));
   }
   function pulseMap(r) {
+    if (r.rep != null && (r.arm_detail || r.loose !== undefined)) { // live rep event: one pulse per arm, none for loose
+      for (const a of armVerdicts(r)) if (a.v !== "LOOSE") pulseArm({ arm: a.arm, cheat: a.v === "CHEAT" });
+      return;
+    }
+    pulseArm(r);
+  }
+  function pulseArm(r) {
     const side = r.arm === "L" ? "left" : "right";
     const key = r.cheat ? `front-deltoids/${side}` : `biceps/${side}`;
     const cls = r.cheat ? "pulse-red" : "pulse-green";
@@ -406,12 +431,12 @@
   }
   const cuePlayed = new Map(); // "set:rep" -> {cheat, arms}
   function onRep(r, fresh) {
-    if (r.set_id !== currentSetId) { currentSetId = r.set_id; setState = newSet(); }
+    if (r.set_id !== currentSetId) { currentSetId = r.set_id; setState = newSet(); if (fresh) setSaturatedHint([]); }
     setState.set_no = r.set_no ?? setState.set_no;
     setState.reps.set(r.rep, !!(setState.reps.get(r.rep) || r.cheat));
     renderSetLine();
     addFeed(repHtml(r), "");
-    if (fresh || !lastLive[r.arm] || r.rep >= lastLive[r.arm].rep) lastLive[r.arm] = r;
+    for (const a of armVerdicts(r)) if (fresh || !lastLive[a.arm] || r.rep >= lastLive[a.arm].rep) lastLive[a.arm] = r;
     if (fresh && reviewSet) { selectedSet = null; exitReview(false); }
     if (!reviewSet) updateMeter(r);
     if (fresh) loadWorkoutSoon();
@@ -419,8 +444,8 @@
     pulseMap(r);
     const key = `${r.set_id}:${r.rep}`, prev = cuePlayed.get(key);
     const cheatArms = new Set(prev?.cheatArms ?? []);
-    if (r.cheat) cheatArms.add(r.arm);
-    if (r.cheat) {
+    for (const a of armVerdicts(r)) if (a.v === "CHEAT") cheatArms.add(a.arm);
+    if (verdictOf(r) === "CHEAT") {
       const arm = activeArms.length < 2 ? "" : cheatArms.size > 1 ? " · both arms" : ` · ${r.arm === "L" ? "left" : "right"} arm`;
       banner(`Rep ${r.rep}${arm}: the front delt took over`);
     }
@@ -430,10 +455,11 @@
     if (cuePlayed.size > 200) cuePlayed.delete(cuePlayed.keys().next().value);
   }
   function onSetEnd(e) {
+    setSaturatedHint(e.delt_saturated);
     if (e.too_short) {
       addFeed(`<span class="v none"></span><span class="t">Set ${e.set_no ?? ""} done · ${e.n_reps} rep${e.n_reps === 1 ? "" : "s"}</span><span class="x"></span><span class="w none">Too short</span>`, "setend");
       currentSetId = null;
-      $("coach").textContent = `Set too short (${e.n_reps} rep${e.n_reps === 1 ? "" : "s"}): no summary.`;
+      showReport(`Set ${dayNo(e.set_id, e.set_no)}`, "", `Set too short (${e.n_reps} rep${e.n_reps === 1 ? "" : "s"}): no summary.`, null);
       return;
     }
     playClip(e.cue);
@@ -603,6 +629,7 @@
     setTimeout(() => { clearInterval(cdTimer); clearTimeout(cdVoiceTimer); $("cd").classList.remove("show"); }, delay);
   }
   function onCountdown(e) {
+    if (e.phase === "start") setSaturatedHint([]);
     if (e.phase === "start" && !MUTED && !QUIET && !isSpeaker) toast("This tab is silent: the voice plays on another tab. Click \"This tab is silent\" to hear it here.", 6000);
     if (e.phase === "start") { cancelLoop(); showCountdown(e.ends_at); playCountdownVoice(e.ms); }
     else if (e.phase === "go") hideCountdown(900);
@@ -634,7 +661,8 @@
   }
   function loopAfterSet(e) {
     cancelLoop();
-    if (!$("handsFree").checked || !controller()) return;
+    // Never auto-start a live set after a replayed one (demo fallback).
+    if (!$("handsFree").checked || !controller() || lastStatus?.mode === "replay") return;
     waitingSet = e.set_id;
     if (e.too_short) return scheduleNext();
     waitTimer = setTimeout(scheduleNext, 45_000); // coach audio never came: go on anyway
