@@ -65,7 +65,12 @@ export class Pipeline {
 
   // ------------------------------------------------------------------ device input
   ingest(b: Batch): { duplicate: boolean } {
-    const sess = this.live ?? this.startSession({ person: "Mike", walkup: false, kind: b.device.startsWith("lw-fake") ? "fake" : "live" });
+    // Guard: real hardware never feeds a fake-device session. A non-fake device with no open session,
+    // or with a fake one open, gets a fresh live session for Mike (even while a replay is playing).
+    const realDevice = !b.device.startsWith("lw-fake");
+    const sess = this.live && !(realDevice && this.live.kind !== "live")
+      ? this.live
+      : this.openSession({ person: "Mike", walkup: false, kind: realDevice ? "live" : "fake" });
     const id = this.store.saveBatch(sess.id, b);
     if (id === null) return { duplicate: true };
     sess.lastBatchId = id;
@@ -156,13 +161,17 @@ export class Pipeline {
 
   startSession(o: { person: string; walkup: boolean; kind: "live" | "fake"; arms?: Arm[] }) {
     if (this.replay) throw new HttpError(409, "A replay is running; stop it first.");
+    return this.openSession(o);
+  }
+  /** No replay check: device ingest must never fail because a replay is on screen. */
+  private openSession(o: { person: string; walkup: boolean; kind: "live" | "fake"; arms?: Arm[] }) {
     if (this.live) this.endLive();
     const sess = this.newSess(o);
     this.live = sess;
     console.log(`[session] ${sess.id} ${sess.person}${sess.isWalkUp ? " (walk-up)" : ""} arms=${sess.arms.join("+")} kind=${sess.kind}`);
     // Arm a default set right away so reps count even if nobody touches the dashboard.
     this.cmdStartSet(sess, { ...DEFAULT_SET, arms: sess.arms });
-    this.hub.send({ type: "session", session_id: sess.id, person: sess.person, walkup: sess.isWalkUp, arms: sess.arms });
+    if (!this.replay) this.hub.send({ type: "session", session_id: sess.id, person: sess.person, walkup: sess.isWalkUp, arms: sess.arms });
     this.pushStatus();
     return sess;
   }
