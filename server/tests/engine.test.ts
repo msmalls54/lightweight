@@ -1,0 +1,303 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { CH, DEFAULT_CONFIG, Engine, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent } from "../src/engine/index.js";
+import { hold, presets, synth, toBatches, type SynthOptions, type SynthRep } from "../src/engine/fixtures.js";
+
+const CTX: SetContext = {
+  session_id: "s1",
+  set_id: "set-1",
+  person: "Mike",
+  exercise: "dumbbell curl",
+  variant: "standing",
+  load_lb: 35,
+  arms: ["R"],
+};
+
+const REST = [570, 495, 560, 520];
+const MVC = [14960, 14960, 14960, 14960];
+
+function calibrated(cfg?: ConstructorParameters<typeof Engine>[0]): Engine {
+  const e = new Engine(cfg);
+  e.setCalibration({ rest: REST, mvc: MVC, ok: true, problems: [] });
+  return e;
+}
+
+/** Runs one set through the engine; returns all events and the set_end. */
+function runSet(e: Engine, reps: SynthRep[], ctx: Partial<SetContext> = {}, opts: SynthOptions = {}) {
+  const s = synth(reps, { rest: REST, ...opts });
+  e.startSet({ ...CTX, ...ctx });
+  const events: EngineEvent[] = [];
+  for (const b of toBatches(s.ch, s.hz)) events.push(...e.ingest(b));
+  const end = e.endSet() ?? (events.find((x) => x.type === "set_end") as SetEndEvent);
+  const repEvents = events.filter((x): x is RepEvent => x.type === "rep");
+  return { events, repEvents, end, synth: s };
+}
+
+test("exports the BUILD.md channel map", () => {
+  assert.deepEqual(CH, { R_BI: 0, R_DELT: 1, L_BI: 2, L_DELT: 3 });
+});
+
+test("clean set: every rep found, none flagged, decision continue", () => {
+  const { end, repEvents } = runSet(calibrated(), presets.clean(8));
+  assert.equal(end.reps.length, 8);
+  assert.equal(repEvents.length, 8);
+  assert.equal(end.cheats, 0);
+  assert.equal(end.clean, 8);
+  assert.equal(end.first_cheat_rep, null);
+  assert.equal(end.decision.next, "continue");
+  for (const r of end.reps) {
+    assert.ok(r.delt_share > 0.05 && r.delt_share < 0.15, `rep ${r.rep} share ${r.delt_share}`);
+    assert.equal(r.arm, "R");
+    assert.equal(r.r_share, null);
+    assert.ok(r.end_ms - r.start_ms > 1000);
+    assert.ok(r.up_ms > 300 && r.down_ms > 300);
+  }
+  assert.deepEqual(end.reps.map((r) => r.rep), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(end.reps[0].baseline_delt_share, null);
+  assert.equal(end.reps[1].baseline_delt_share, null);
+  assert.ok(end.reps[2].baseline_delt_share! > 0.05);
+});
+
+test("rep windows line up with the ground truth", () => {
+  const { end, synth: s } = runSet(calibrated(), presets.clean(4));
+  end.reps.forEach((r, i) => {
+    const truth = s.reps[i];
+    const start = r.start_ms - 100_000;
+    assert.ok(start >= truth.start && start < truth.start + 500, `start ${start} vs ${truth.start}`);
+    assert.ok(r.end_ms - 100_000 <= truth.end, `end ${r.end_ms - 100_000} vs ${truth.end}`);
+  });
+});
+
+test("swing set: every rep flagged from rep 1", () => {
+  const { end } = runSet(calibrated(), presets.swing(5));
+  assert.equal(end.reps.length, 5);
+  assert.equal(end.cheats, 5);
+  assert.equal(end.first_cheat_rep, 1);
+  for (const r of end.reps) {
+    assert.ok(r.delt_share > 0.4, `share ${r.delt_share}`);
+    assert.ok(r.cheat_reason === "delt_share_jump" || r.cheat_reason === "delt_peak");
+  }
+});
+
+test("fatigue drift: clean through rep 5, delt takes over from rep 6", () => {
+  const { end } = runSet(calibrated(), presets.fatigueDrift(10));
+  assert.equal(end.reps.length, 10);
+  assert.deepEqual(end.reps.slice(0, 5).map((r) => r.cheat), [false, false, false, false, false]);
+  assert.equal(end.first_cheat_rep, 6);
+  assert.ok(end.reps.slice(5).every((r) => r.cheat));
+  assert.equal(end.reps[5].cheat_reason, "delt_share_jump");
+  // delt_share trends up after rep 5
+  const shares = end.reps.map((r) => r.delt_share);
+  for (let i = 6; i < shares.length; i++) assert.ok(shares[i] >= shares[i - 1] - 0.01);
+  // late cheat (rep 6, not before it): no early-stop rule
+  assert.equal(end.decision.next, "continue");
+  assert.match(end.decision.reason, /first at rep 6/);
+});
+
+test("delt peak alone flags a rep", () => {
+  // biceps works hard, so share stays low, but the delt spikes past 0.5
+  // share-jump rule switched off so only the peak rule can fire
+  const reps: SynthRep[] = [...presets.clean(3), { bi: 1.3, delt: 0.55 }];
+  const { end } = runSet(calibrated({ deltShareJump: 0.5 }), reps);
+  const last = end.reps[3];
+  assert.ok(last.delt_share < 0.35);
+  assert.equal(last.cheat, true);
+  assert.equal(last.cheat_reason, "delt_peak");
+});
+
+test("early cheats two sets in a row -> stop at first cheat, rest longer (never a load change)", () => {
+  const e = calibrated();
+  const early: SynthRep[] = [...presets.clean(2), ...presets.swing(3)];
+  const a = runSet(e, early, { set_id: "a" }).end;
+  assert.equal(a.first_cheat_rep, 3);
+  assert.equal(a.decision.next, "continue"); // first time: warning only (plan: "two sets in a row")
+  assert.match(a.decision.reason, /next set/);
+  const b = runSet(e, early, { set_id: "b" }).end;
+  assert.equal(b.decision.next, "stop_at_first_cheat_rest_longer");
+  for (const d of [a.decision, b.decision]) assert.doesNotMatch(d.reason, /(add|drop|increase|decrease|lower|heavier|lighter)/i);
+
+  // earlyCheatSetsInRow = 1 fires on the first such set
+  const e1 = calibrated({ earlyCheatSetsInRow: 1 });
+  assert.equal(runSet(e1, early).end.decision.next, "stop_at_first_cheat_rest_longer");
+});
+
+test("a clean set resets the early-cheat streak", () => {
+  const e = calibrated();
+  const early: SynthRep[] = [...presets.clean(2), ...presets.swing(3)];
+  runSet(e, early, { set_id: "a" });
+  runSet(e, presets.clean(5), { set_id: "b" });
+  assert.equal(runSet(e, early, { set_id: "c" }).end.decision.next, "continue");
+});
+
+test("very fast up phase on most reps -> slow_the_tempo", () => {
+  const { end } = runSet(calibrated(), presets.fast(6));
+  assert.equal(end.reps.length, 6);
+  assert.ok(end.reps.every((r) => r.up_ms < DEFAULT_CONFIG.fastUpMs), end.reps.map((r) => r.up_ms).join(","));
+  assert.equal(end.decision.next, "slow_the_tempo");
+});
+
+test("slow envelope decay after a hard rep is one rep, not two", () => {
+  const reps: SynthRep[] = Array.from({ length: 4 }, () => ({ bi: 1.2, delt: 0.1, tailMs: 1800, tailLevel: 0.32, gapMs: 600 }));
+  const { end } = runSet(calibrated(), reps, {}, { noise: 60 });
+  assert.equal(end.reps.length, 4);
+  assert.equal(end.cheats, 0);
+});
+
+test("min rep duration and min gap reject blips", () => {
+  const reps: SynthRep[] = [
+    { bi: 0.8, upMs: 100, holdMs: 0, downMs: 150, gapMs: 1000 }, // 250 ms twitch: not a rep
+    { bi: 0.8, gapMs: 150 },
+    { bi: 0.6, upMs: 120, holdMs: 0, downMs: 120, gapMs: 1000 }, // re-bounce 150 ms after a rep: ignored
+    { bi: 0.8 },
+  ];
+  const { end } = runSet(calibrated(), reps);
+  assert.equal(end.reps.length, 2);
+});
+
+test("dead channel: calibration names it, reps still count, never a fake cheat", () => {
+  const e = new Engine();
+  const rest = hold(REST, 3000, { dead: [CH.R_DELT] });
+  const mvc = hold([14000, 9000, 13000, 8000], 3000, { dead: [CH.R_DELT] });
+  const cal = e.calibrate(rest, mvc);
+  assert.equal(cal.ok, false);
+  assert.equal(cal.problems.length, 1);
+  assert.match(cal.problems[0], /R front delt \(A1\)/);
+
+  const { end } = runSet(e, presets.clean(5), {}, { dead: [CH.R_DELT] });
+  assert.equal(end.reps.length, 5);
+  assert.equal(end.cheats, 0);
+  for (const r of end.reps) assert.ok(r.mean_pct[CH.R_DELT] < 0.01);
+});
+
+test("calibration: good channels pass, RAW-mode channel and one-arm walk-ups", () => {
+  const e = new Engine();
+  const ok = e.calibrate(hold(REST, 3000), hold([14000, 9000, 13000, 8000], 3000));
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.problems, []);
+  assert.ok(Math.abs(ok.rest[0] - 570) < 40);
+  assert.ok(Math.abs(ok.mvc[1] - 9000) < 60);
+
+  const raw = e.calibrate(hold([570, 495, 8150, 520], 3000), hold([14000, 9000, 8200, 8000], 3000));
+  assert.equal(raw.ok, false);
+  assert.match(raw.problems.join("\n"), /L biceps \(A2\).*RAW/);
+
+  // walk-up with only the right arm wired: left jacks are empty but that's fine
+  const walkUp = e.calibrate(hold([570, 495, 0, 0], 3000, { dead: [2, 3] }), hold([14000, 9000, 0, 0], 3000, { dead: [2, 3] }), ["R"]);
+  assert.equal(walkUp.ok, true);
+});
+
+test("calibration rescales %MVC", () => {
+  const e = new Engine();
+  e.calibrate(hold(REST, 3000, { noise: 0 }), hold([7570, 7495, 7560, 7520], 3000, { noise: 0 }));
+  const [live] = e.ingest({ device: "d", seq: 0, t0_ms: 0, dt_ms: 5, ch: [[4070], [9000], [560], [99999]] });
+  assert.equal(live.type, "live");
+  const pct = (live as { pct: number[] }).pct;
+  assert.equal(pct[0], 0.5);
+  assert.equal(pct[1], 1.215);
+  assert.equal(pct[2], 0);
+  assert.equal(pct[3], 1.5); // clamped
+});
+
+test("works before calibration (defaults rest 550, mvc 14960)", () => {
+  const e = new Engine();
+  const { end } = runSet(e, presets.clean(4));
+  assert.equal(end.reps.length, 4);
+  const [live] = e.ingest({ device: "d", seq: 999, t0_ms: 10_000_000, dt_ms: 5, ch: [[7755], [550], [550], [550]] });
+  assert.equal((live as { pct: number[] }).pct[0], 0.5);
+});
+
+test("live frames at ~20 Hz from 200 Hz input, in order", () => {
+  const e = calibrated();
+  const s = synth(presets.clean(1), { leadMs: 1000, tailMs: 1000 });
+  const live = toBatches(s.ch, s.hz).flatMap((b) => e.ingest(b)).filter((x) => x.type === "live");
+  const seconds = s.ch[0].length / s.hz;
+  assert.ok(Math.abs(live.length / seconds - 20) < 1.5, `${live.length} frames in ${seconds}s`);
+  for (let i = 1; i < live.length; i++) assert.ok(live[i].t_ms > live[i - 1].t_ms);
+  assert.equal((live[0] as { pct: number[] }).pct.length, 4);
+});
+
+test("no set started: live frames only, no reps", () => {
+  const e = calibrated();
+  const s = synth(presets.clean(3));
+  const ev = toBatches(s.ch, s.hz).flatMap((b) => e.ingest(b));
+  assert.ok(ev.length > 0);
+  assert.ok(ev.every((x) => x.type === "live"));
+  assert.equal(e.endSet(), null);
+});
+
+test("auto set_end after ~10 s without a rep", () => {
+  const e = calibrated();
+  const s = synth(presets.clean(3), { tailMs: 11_000 });
+  e.startSet(CTX);
+  const ev = toBatches(s.ch, s.hz).flatMap((b) => e.ingest(b));
+  const ends = ev.filter((x): x is SetEndEvent => x.type === "set_end");
+  assert.equal(ends.length, 1);
+  assert.equal(ends[0].reps.length, 3);
+  assert.equal(ends[0].set_id, "set-1");
+  const lastRep = ends[0].reps[2];
+  const endIdx = ev.indexOf(ends[0]);
+  const endT = (ev.slice(0, endIdx).reverse().find((x) => x.type === "live") as { t_ms: number }).t_ms;
+  assert.ok(endT - lastRep.end_ms >= 9_900 && endT - lastRep.end_ms <= 10_100);
+  assert.equal(e.endSet(), null); // already ended
+});
+
+test("duplicate and overlapping batches don't double-count", () => {
+  const e = calibrated();
+  const s = synth(presets.clean(4));
+  e.startSet(CTX);
+  const batches = toBatches(s.ch, s.hz);
+  let reps = 0;
+  for (const b of batches) {
+    reps += e.ingest(b).filter((x) => x.type === "rep").length;
+    reps += e.ingest(b).filter((x) => x.type === "rep").length; // resend
+  }
+  assert.equal(reps, 4);
+});
+
+test("device restart (millis jumps back) keeps working", () => {
+  const e = calibrated();
+  e.startSet(CTX);
+  const a = synth(presets.clean(2), { seed: 3 });
+  const b = synth(presets.clean(2), { seed: 4 });
+  let reps = 0;
+  for (const x of toBatches(a.ch, a.hz, { t0_ms: 500_000 })) reps += e.ingest(x).filter((y) => y.type === "rep").length;
+  for (const x of toBatches(b.ch, b.hz, { t0_ms: 0 })) reps += e.ingest(x).filter((y) => y.type === "rep").length;
+  assert.equal(reps, 4);
+});
+
+test("bilateral curls: one rep per curl, r_share shows the weaker side", () => {
+  const reps: SynthRep[] = Array.from({ length: 5 }, () => ({ arm: "both" as const, bi: 0.8, lBi: 0.5 }));
+  const { end } = runSet(calibrated(), reps, { arms: ["R", "L"] });
+  assert.equal(end.reps.length, 5);
+  for (const r of end.reps) {
+    assert.ok(r.r_share! > 0.58 && r.r_share! < 0.65, `r_share ${r.r_share}`);
+  }
+});
+
+test("left arm only uses the left channels", () => {
+  const reps: SynthRep[] = [...presets.clean(3).map((r) => ({ ...r, arm: "L" as const })), { arm: "L", bi: 0.5, delt: 0.6 }];
+  const { end } = runSet(calibrated(), reps, { arms: ["L"] });
+  assert.equal(end.reps.length, 4);
+  assert.ok(end.reps.every((r) => r.arm === "L"));
+  assert.equal(end.first_cheat_rep, 4);
+  // right-arm-only set sees nothing
+  assert.equal(runSet(calibrated(), reps, { arms: ["R"] }).end.reps.length, 0);
+});
+
+test("per-variant threshold overrides", () => {
+  const reps: SynthRep[] = [...presets.clean(3), { bi: 1.0, delt: 0.45 }];
+  assert.equal(runSet(calibrated({ deltShareJump: 0.5 }), reps).end.cheats, 0);
+  const strictPreacher = calibrated({ deltShareJump: 0.5, variantOverrides: { preacher: { deltPeakMax: 0.4 } } });
+  assert.equal(runSet(strictPreacher, reps, { variant: "preacher" }).end.cheats, 1);
+  assert.equal(runSet(strictPreacher, reps, { variant: "standing" }).end.cheats, 0);
+});
+
+test("endSet keeps a long-enough rep still in progress", () => {
+  const e = calibrated();
+  const s = synth([{ bi: 0.8, upMs: 600, holdMs: 3000 }], { tailMs: 0 });
+  e.startSet(CTX);
+  const n = Math.round(((1000 + 600 + 1500) * s.hz) / 1000); // stop mid-hold
+  for (const b of toBatches(s.ch.map((c) => c.slice(0, n)), s.hz)) e.ingest(b);
+  const end = e.endSet()!;
+  assert.equal(end.reps.length, 1);
+});
