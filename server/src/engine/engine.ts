@@ -26,6 +26,8 @@ interface SetState {
   arms: Arm[];
   th: RepThresholds;
   reps: RepEvent[];
+  /** Raw samples of this set (for autoRaiseMvc at set end). */
+  raw: number[][];
   /** Per-arm rep history (reps where that arm worked), for the reference. */
   armReps: Record<Arm, ArmRep[]>;
   phase: "idle" | "rep";
@@ -60,6 +62,11 @@ function upRatio(w: Sample[], arm: Arm, biPeak: number, from: number): number {
     d += w[i].pct[delt];
   }
   return b > EPS ? d / b : 0;
+}
+
+/** Could this be a clean rep's numbers? (Blatant by the no-reference rules = no.) */
+function plausibleRef(r: Ref, th: RepThresholds): boolean {
+  return r.upRatio <= th.fallbackUpRatio && r.share <= th.fallbackShareMax;
 }
 
 /** A reference measured under one calibration, expressed under another (biceps pct x kb, delt pct x kd). */
@@ -180,6 +187,7 @@ export class Engine {
       th: thresholdsFor(this.cfg, ctx.variant),
       reps: [],
       armReps: { R: [], L: [] },
+      raw: [[], [], [], []],
       phase: "idle",
       pre: [],
       rep: [],
@@ -203,15 +211,25 @@ export class Engine {
       if (t <= this.lastT) continue; // duplicate / overlapping batch
       this.lastT = t;
       this.lastDt = dt;
+      // Detection and scoring use %MVC clamped only at detectPctMax (3): a too-low MVC must not
+      // flatten every rep at the 1.5 display clamp. Live frames and reported values use pctMax.
       const pct = [0, 1, 2, 3].map((c) => {
         const raw = b.ch[c]?.[i];
-        return raw === undefined ? 0 : toPct(raw, this.scale.rest[c], this.scale.span[c], this.cfg.pctMax);
+        return raw === undefined ? 0 : toPct(raw, this.scale.rest[c], this.scale.span[c], this.cfg.detectPctMax);
       });
       if (t >= this.nextLiveT - 1e-6) {
-        out.push({ type: "live", t_ms: t, pct: pct.map(r3) });
+        out.push({ type: "live", t_ms: t, pct: pct.map((p) => r3(Math.min(this.cfg.pctMax, p))) });
         this.nextLiveT = t + this.cfg.liveIntervalMs;
       }
-      if (this.set) this.step({ t, pct }, out);
+      if (this.set) {
+        if (this.cfg.autoRaiseMvc && this.set.raw[0].length < this.cfg.maxSetSamples) {
+          for (let c = 0; c < 4; c++) {
+            const raw = b.ch[c]?.[i];
+            if (raw !== undefined) this.set.raw[c].push(raw);
+          }
+        }
+        this.step({ t, pct }, out);
+      }
     }
     return out;
   }
@@ -272,7 +290,7 @@ export class Engine {
       s.repPeak = Math.max(...s.rep.map((p) => this.signal(s, p.pct)));
     }
 
-    if (s.reps.length > 0 && s.lastRepEndT !== null && x.t - s.lastRepEndT >= this.cfg.setEndGapMs) {
+    if (s.reps.length > 0 && s.lastRepEndT !== null && x.t - s.lastRepEndT >= this.cfg.autoEndMs) {
       out.push(this.closeSet());
     }
   }
@@ -326,7 +344,7 @@ export class Engine {
         deltPeak: peak[ARM_CH[arm].delt],
         upRatio: upRatio(w, arm, peak[ARM_CH[arm].bi], th.upPhaseFrom),
       };
-      const ref = this.setRef(s, arm) ?? this.sessionRef(s.ctx, arm);
+      const ref = this.setRef(s, arm) ?? this.sessionRef(s.ctx, arm, th);
       return { arm, cur, ref, reason: judge(cur, ref, th) };
     });
     const cheating = evals.filter((e) => e.reason !== null);
@@ -352,8 +370,8 @@ export class Engine {
       rep: s.reps.length + 1,
       start_ms: w[0].t,
       end_ms: endT,
-      peak_pct: peak.map(r3),
-      mean_pct: mean.map(r3),
+      peak_pct: peak.map((p) => r3(Math.min(this.cfg.pctMax, p))),
+      mean_pct: mean.map((p) => r3(Math.min(this.cfg.pctMax, p))),
       delt_share: r3(pick.cur.share),
       baseline_delt_share: pick.ref === null ? null : r3(pick.ref.share),
       up_delt_ratio: r3(pick.cur.upRatio),
@@ -374,7 +392,8 @@ export class Engine {
   private setRef(s: SetState, arm: Arm): Ref | null {
     const first = s.armReps[arm].slice(0, s.th.baselineReps);
     if (first.length < s.th.baselineReps) return null;
-    const clean = first.filter((r) => !r.flagged);
+    // A rep that would be a blatant cheat on its own is never the clean reference.
+    const clean = first.filter((r) => !r.flagged && plausibleRef(r, s.th));
     if (clean.length === 0) return null;
     return {
       share: Math.max(...clean.map((r) => r.share)),
@@ -389,9 +408,11 @@ export class Engine {
   }
 
   /** The last clean reference for this arm + exercise + variant + load earlier in this session. */
-  private sessionRef(ctx: SetContext, arm: Arm): Ref | null {
+  private sessionRef(ctx: SetContext, arm: Arm, th: RepThresholds): Ref | null {
     if (this.sessionRefs.session !== ctx.session_id) return null;
-    return this.sessionRefs.refs.get(this.refKey(ctx, arm)) ?? null;
+    const ref = this.sessionRefs.refs.get(this.refKey(ctx, arm)) ?? null;
+    // After an MVC raise a reference can turn out blatant (a too-low MVC hid a delt-led rep): drop it.
+    return ref && plausibleRef(ref, th) ? ref : null;
   }
 
   private closeSet(): SetEndEvent {
@@ -405,7 +426,7 @@ export class Engine {
     const reps = s.reps;
     const cheats = reps.filter((r) => r.cheat).length;
     const first = reps.find((r) => r.cheat)?.rep ?? null;
-    return {
+    const ev: SetEndEvent = {
       type: "set_end",
       set_id: s.ctx.set_id,
       reps,
@@ -414,6 +435,14 @@ export class Engine {
       first_cheat_rep: first,
       decision: this.decide(s.ctx, reps, cheats, first),
     };
+    // Self-calibrating MVC: a set with reps raises each channel's MVC to its own p99 (never lowers).
+    // The refs saved above are rescaled by setCalibration, so the next set stays consistent.
+    if (this.cfg.autoRaiseMvc && reps.length > 0 && s.raw[0].length > 0) {
+      const before = this.cal?.mvc.join(",");
+      const c = this.raiseMvc([s.raw], this.cfg.autoRaisePercentile);
+      if (c.mvc.join(",") !== before) ev.calibration = c;
+    }
+    return ev;
   }
 
   /** Plan rules (data/coach/plan.json, values in config). Never a load change. */
