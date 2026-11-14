@@ -25,7 +25,17 @@ export const CLIPS: Record<string, string> = {
   slow_it_down: "Slow it down. No bouncing.",
   left_slacking: "Left side's slacking.",
   right_slacking: "Right side's slacking.",
-  set_done: "Set's done. Rack it.",
+  set_done: "Set's done.",
+  // Instant set-end feedback (played right at set end while the summary TTS loads).
+  all_clean: "Every rep clean.",
+  one_cheat: "One cheat rep.",
+  two_cheats: "Two cheat reps.",
+  three_cheats: "Three cheat reps.",
+  four_cheats: "Four cheat reps.",
+  many_cheats: "Five or more cheat reps.",
+  big_swing: "Big swing in there.",
+  shoulder_late: "Your shoulder took over at the end.",
+  learning_clean_rep: "Still learning your clean rep.",
   stop_and_rest: "Stop there. Rest longer before the next set.",
   nice_set: "Nice set. Every rep clean.",
   calibrate_relax: "Relax your arms. Stay still.",
@@ -163,16 +173,32 @@ export function voiceStatus() {
 
 const sayCache = new Map<string, Buffer>();
 
-/** Live Gemini TTS for summaries and Q&A answers. Short in-memory cache by text. */
+const sayInFlight = new Map<string, Promise<Buffer>>();
+
+/**
+ * Live Gemini TTS for summaries and Q&A answers. Short in-memory cache by text, and concurrent
+ * calls for the same text share one Gemini request (the server's pre-TTS and the speaker tab's
+ * /voice/say never pay twice).
+ */
 export async function speak(text: string): Promise<Buffer> {
   const t = text.trim().slice(0, 600);
   if (!t) throw new Error("empty text");
   const hit = sayCache.get(t);
   if (hit) return hit;
-  const wav = trimSilence(await getSynth()(t));
-  sayCache.set(t, wav);
-  if (sayCache.size > 50) sayCache.delete(sayCache.keys().next().value!);
-  return wav;
+  const pending = sayInFlight.get(t);
+  if (pending) return pending;
+  const p = (async () => {
+    try {
+      const wav = trimSilence(await getSynth()(t));
+      sayCache.set(t, wav);
+      if (sayCache.size > 50) sayCache.delete(sayCache.keys().next().value!);
+      return wav;
+    } finally {
+      sayInFlight.delete(t);
+    }
+  })();
+  sayInFlight.set(t, p);
+  return p;
 }
 
 function wavResponse(wav: Buffer, cache: boolean): Response {

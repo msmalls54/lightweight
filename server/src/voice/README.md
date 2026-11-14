@@ -23,9 +23,15 @@ registerVoiceRoutes(server.app);                       // GET /voice/clips, GET 
 void initVoice({ apiKey: loadGeminiKey() ?? "", cacheDir: DEFAULT_VOICE_CACHE }); // don't await: ~80 s first time, instant once cached
 
 // per RepEvent:   send pickCueSequence(rep, { variant }) to the dashboard -> LWAudio.playClip(keys)  e.g. ["rep_6","delt_took_over"]
-// per SetEndEvent: LWAudio.playClip(pickSetEndCue(set)); then const line = await summarizeSet(buildCoachContext({ person, todaySets }), set) -> LWAudio.say(line)
+// per SetEndEvent: cue = pickSetEndCueSequence(set) -> LWAudio.playClip(cue)   e.g. ["set_done","three_cheats","big_swing"] (instant, cached)
+//   ctx = buildCoachContext({ person, todaySets, setMeta: store.todaySetMeta(person) })
+//   line = await summarizeSet(ctx, set) (<= 25 words) -> dashboard: LWAudio.coachText(set_id, line)
+//   server speak(line) -> dashboard: LWAudio.coachAudio(set_id, { ok, text, fallback_clip })
+//   card = await summarizeSetDetail(ctx, set)
 // session end (Mike only): writeTodayHistory(todaySets, { person, setMeta })
 ```
+- Spoken summary is capped at 25 words (~8 s). Longer model output is trimmed to whole sentences or replaced by the code line.
+- `speak()` dedups concurrent requests for the same text, so the server's pre-TTS and the speaker tab's `/voice/say` share one Gemini call.
 - `pickCue(rep)` returns one key (BUILD.md contract); `pickCueSequence` stitches the rep number in front of a flag.
 - Cache lives in `server/.cache/voice/` (gitignored) + `clips.json` manifest; a clip regenerates only if its text or
   voice changes. Copy that folder between checkouts to skip the first ~80 s generation.
@@ -35,7 +41,12 @@ void initVoice({ apiKey: loadGeminiKey() ?? "", cacheDir: DEFAULT_VOICE_CACHE })
 - Walk-ups (`person` ≠ profile name): blank profile, generic plan, no history; `writeTodayHistory` skips them.
 
 ## Browser (`public/voice-player.js`)
-`window.LWAudio = { setMusic(el), setMusicVolume(v), playClip(key | keys[]), say(text), cooldownMs: 3000, unlock(), isSpeaking() }`.
+`window.LWAudio = { setMusic(el), setMusicVolume(v), playClip(key | keys[]), say(text), coachText(setId, text), coachAudio(setId, msg), cooldownMs: 3000, fallbackMs: 5000, unlock(), isSpeaking() }`.
+
+**Slow-TTS fallback:** `coachText` starts a 5 s clock when the coach text arrives; if `coachAudio` hasn't come by
+then, the browser speaks the text (`speechSynthesis`, en-US male voice if available, rate 1.05, same ducking) and the
+late Gemini audio is skipped. `say(text)` has the same 5 s guard on its own fetch. Never both, never overlapping.
+Set-end sequences (first key `set_done`) wait their turn instead of being dropped by the cooldown.
 Preloads every clip into Web Audio buffers on load. Voice ducks music to 20% over 150 ms, restores over 400 ms
 (music volume ramp on the element, so music never goes silent if the AudioContext is suspended). Call-outs inside the
 3 s cooldown or while a voice is playing are dropped; `say()` waits its turn. Emits `lwaudio` window events

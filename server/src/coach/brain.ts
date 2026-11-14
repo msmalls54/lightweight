@@ -4,6 +4,8 @@ import { BRAIN_FALLBACK_MODELS, BRAIN_MODEL, BRAIN_THINKING_LEVEL } from "../voi
 import type { CoachContext } from "./context.js";
 import {
   decisionLine,
+  decisionShort,
+  SPOKEN_MAX_WORDS,
   fallbackDetail,
   fallbackSummary,
   forLlm,
@@ -112,7 +114,7 @@ How to read the data (all computed by code):
 - all_clean true: say the set was clean plainly ("your shoulder stayed in its normal range") and give one technique cue. No scary numbers.
 - biceps_peak_pct: how hard each biceps peaked (100 = max flex). A low biceps peak on a cheat = momentum or the shoulder did the work.
 - balance: left vs right biceps, only from reps where both arms curled. balance.verdict says which side slacked. null = don't talk about balance.
-- tempo.fast_up_reps: reps that came up faster than fast_up_threshold_ms. Only say a rep was rushed if it is in that list.
+- tempo.fast_up_reps: reps that came up faster than fast_up_threshold_ms: only those are "rushed". tempo.faster_than_usual_reps: say "faster than your usual" for those, never "rushed".
 - cheat_pattern says whether cheats came late (fatigue) or were scattered.
 
 What you may say:
@@ -188,6 +190,16 @@ function clean(s: string): string {
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const sentences = (s: string) => s.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g)?.map((x) => x.trim()) ?? [s];
 
+/** Keep whole sentences, in order, while they fit in `max` words ("" if even the first doesn't). */
+function fitWords(text: string, max: number): string {
+  const out: string[] = [];
+  for (const s of sentences(text)) {
+    if (words([...out, s].join(" ")) > max) break;
+    out.push(s);
+  }
+  return out.join(" ");
+}
+
 /** Rules every LLM line must pass, or the code line is used instead. */
 function breaksRules(text: string, opts: { historyAllowed: boolean }): boolean {
   return (
@@ -198,8 +210,6 @@ function breaksRules(text: string, opts: { historyAllowed: boolean }): boolean {
   );
 }
 
-/** Spoken limit: about 12 s of speech. */
-export const SPOKEN_MAX_WORDS = 40;
 
 const STATE_HINT = (f: ReturnType<typeof setFacts>) =>
   f.total_reps === 0
@@ -224,14 +234,14 @@ FACTS (this set, computed by code): ${compact({ ...(lift ? { lift } : {}), ...fo
 EARLIER_SETS_TODAY (same lift): ${compact(previousSetsBrief(ctx, set))}
 REQUIRED DECISION: ${decisionLine(set.decision?.next)} (engine reason: ${set.decision?.reason ?? ""})
 
-Write the spoken summary of this set: at most 3 short sentences, at most ${SPOKEN_MAX_WORDS} words, about 12 seconds out loud.
+Write the spoken summary of this set: at most 3 short sentences, at most ${SPOKEN_MAX_WORDS} words (about 8 seconds out loud). Every word counts.
 - ${STATE_HINT(facts)}
-- End with the required decision in your own words.
-Example of the style for a set with cheats (different numbers): "Reps 4 and 8: your right shoulder did 8 times its normal share on the way up, that's a swing. Rep 5 was a smaller cheat. Stop at the first cheat next set and rest longer, same weight."`;
+- End with the required decision in a few words ("${decisionShort(set.decision?.next)}").
+Example of the style for a set with cheats (different numbers, 22 words): "Reps 4 and 8: right shoulder at 8 times normal, that's a swing. Rep 5 smaller. Next set, stop at the first cheat."`;
   try {
     let text = clean(await getBrain()(SYSTEM_PROMPT, prompt));
-    if (words(text) > SPOKEN_MAX_WORDS) text = sentences(text).slice(0, 3).join(" ");
-    if (!text || words(text) > SPOKEN_MAX_WORDS + 8 || breaksRules(text, { historyAllowed })) return fallbackSummary(set);
+    if (words(text) > SPOKEN_MAX_WORDS) text = fitWords(text, SPOKEN_MAX_WORDS);
+    if (!text || words(text) > SPOKEN_MAX_WORDS || breaksRules(text, { historyAllowed })) return fallbackSummary(set);
     if (!namesAllReps(text, facts.cheat_reps, lastRepNo(set))) return fallbackSummary(set);
     return text;
   } catch {
