@@ -151,3 +151,27 @@ test("speak shares one TTS request between concurrent calls for the same text", 
   assert.equal(calls, 1);
   assert.equal(a, b);
 });
+
+
+test("the dashboard's lead-in lines are clips: /voice/say serves them from disk, no TTS call", async () => {
+  _resetVoiceForTests();
+  const calls: string[] = [];
+  const dir = tmp();
+  await initVoice({ apiKey: "x", cacheDir: dir, synth: fakeSynth(calls), keys: ["countdown_lead", "calibrate_lead_in"], log: () => {} });
+  assert.equal(calls.length, 2);
+  const wav = await speak("Pick them up. Three, two, one, curl!");
+  assert.ok(isWav(wav));
+  await speak("Three. Two. One. Squeeze!");
+  assert.equal(calls.length, 2); // served from the cached clips
+});
+
+test("/voice/build: a stable short id of the dashboard JS", async () => {
+  const { dashboardBuild } = await import("../src/voice/index.js");
+  const app = new Hono();
+  registerVoiceRoutes(app);
+  const r = await app.request("/voice/build");
+  assert.equal(r.headers.get("cache-control"), "no-store");
+  const { build } = (await r.json()) as { build: string };
+  assert.match(build, /^[0-9a-f]{10}$/);
+  assert.equal(build, dashboardBuild());
+});

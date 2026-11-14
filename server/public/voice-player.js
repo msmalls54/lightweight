@@ -38,6 +38,7 @@
   var busy = false; // a voice is playing
   var lastStart = 0;
   var coach = {}; // setId -> {text, by: null|"gemini"|"browser", timer}: who owns that set's line
+  var enabled = true; // false = this tab must not speak (not the speaker tab, or a stale build)
   var sinkId = ""; // audio output for every voice (③ dashboard: "Coach audio output"); "" = system default
 
   function audioCtx() {
@@ -176,6 +177,12 @@
     var ss = window.speechSynthesis;
     var U = window.SpeechSynthesisUtterance;
     if (!ss || !U) return Promise.resolve(false);
+    // speechSynthesis always plays on the system default output and can't follow setSinkId: with a
+    // chosen output (e.g. the Bluetooth speaker) it would come out of the wrong device, so show text only.
+    if (sinkId) {
+      emit("no_route", what);
+      return Promise.resolve(false);
+    }
     return withDuck(function () {
       return new Promise(function (resolve) {
         var u = new U(text);
@@ -237,6 +244,10 @@
   function enqueue(job, what) {
     pending++;
     var run = chain.then(function () {
+      if (!enabled) {
+        emit("drop", what + ":disabled");
+        return false;
+      }
       busy = true;
       lastStart = Date.now();
       cancelBrowserSpeech();
@@ -449,6 +460,48 @@
       return enqueue(function () {
         return speakLine(text, audioP, deadline, null, "coach:" + setId);
       }, "coach:" + setId);
+    },
+
+    /**
+     * Play an <audio> element (countdown, calibration lead-in, ...) through the same queue and lock,
+     * ducked like any voice. opts.dropIfBusy: skip it if anything is queued (timing-critical lines).
+     * Resolves when it has finished (true) or was skipped (false).
+     */
+    playElement: function (el, opts) {
+      var what = (opts && opts.what) || "element";
+      if (!el) return Promise.resolve(false);
+      if (!enabled || (opts && opts.dropIfBusy && pending > 0)) {
+        emit("drop", what);
+        return Promise.resolve(false);
+      }
+      return enqueue(function () {
+        return withDuck(function () {
+          return new Promise(function (resolve) {
+            var settled = false;
+            function done() {
+              if (settled) return;
+              settled = true;
+              clearTimeout(guard);
+              resolve(true);
+            }
+            var secs = Number(el.duration);
+            var guard = setTimeout(done, (isFinite(secs) && secs > 0 ? secs * 1000 : 8000) + 2000);
+            el.onended = done;
+            el.onerror = done;
+            try {
+              el.currentTime = 0;
+            } catch (e) {}
+            var p = el.play && el.play();
+            if (p && p.catch) p.catch(done);
+          });
+        }, what);
+      }, what);
+    },
+
+    /** false = this tab must not speak at all (not the speaker tab, or its JS build is stale). */
+    setEnabled: function (on) {
+      enabled = !!on;
+      if (!enabled) cancelBrowserSpeech();
     },
 
     isSpeaking: function () {
