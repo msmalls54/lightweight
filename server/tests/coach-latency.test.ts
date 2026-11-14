@@ -74,3 +74,16 @@ test("the spoken first sentence of every code line carries the point in <= 15 wo
     assert.ok(words(first) <= 15, first);
   }
 });
+
+test("1-rep sets and small multiples read right (no 'All 1 reps', no '1 times')", async () => {
+  const { fallbackDetail: fd, fallbackSummary: fs1 } = await import("../src/coach/index.js");
+  const one: SetEndEvent = { ...CLEAN3, reps: [CLEAN3.reps[2]], clean: 1, cheats: 0 };
+  assert.match(fs1(one), /^1 rep, clean, shoulder in its normal range\./);
+  const d = fd(one);
+  assert.equal(d.headline, "1 rep, clean");
+  assert.match(d.bullets.join(" "), /The rep was clean: your shoulder stayed/);
+  const all = [fs1(one), d.headline, ...d.bullets].join(" ");
+  assert.doesNotMatch(all, /\b1 reps\b|\b1 cheats\b|\b1 sets\b|\b1 times\b/);
+  const mild: SetEndEvent = { ...SET1, cheats: 1, reps: SET1.reps.map((r) => (r.rep === 5 ? { ...r, up_delt_ratio: 0.22 } : { ...r, cheat: false })) };
+  assert.match(fs1(mild), /Rep 5: right shoulder at 1\.4 times normal\./);
+});

@@ -13,18 +13,64 @@ export const CUE_CONFIG = {
 export interface PickCueOptions {
   /** Preacher cheats are elbows lifting off the pad -> "elbows_in". Others -> "delt_took_over". */
   variant?: Variant;
+  /**
+   * The previous rep of the same set, for the 2-in-a-row imbalance rule. Optional: by default the
+   * picker remembers each set's reps itself (keyed by set_id).
+   */
+  prevRep?: RepEvent | null;
+}
+
+type Side = "left_slacking" | "right_slacking";
+
+/**
+ * L/R imbalance for one rep, or null. Only when BOTH biceps actually curled (peak >= the engine's
+ * rep threshold), the same guard as setFacts' balance: a one-arm rep has r_share ~0 or ~1, which is
+ * not an imbalance.
+ */
+export function repImbalance(rep: RepEvent | null | undefined): Side | null {
+  if (!rep || rep.r_share == null || !Number.isFinite(rep.r_share)) return null;
+  const hi = DEFAULT_CONFIG.hi;
+  if (!((rep.peak_pct?.[0] ?? 0) >= hi && (rep.peak_pct?.[2] ?? 0) >= hi)) return null;
+  if (rep.r_share > CUE_CONFIG.rShareHigh) return "left_slacking";
+  if (rep.r_share < CUE_CONFIG.rShareLow) return "right_slacking";
+  return null;
+}
+
+/** set_id -> rep number -> that rep's imbalance (bounded). */
+const seen = new Map<string, Map<number, Side | null>>();
+function remember(rep: RepEvent, side: Side | null) {
+  let m = seen.get(rep.set_id);
+  if (!m) {
+    if (seen.size > 50) seen.delete(seen.keys().next().value!);
+    seen.set(rep.set_id, (m = new Map()));
+  }
+  m.set(rep.rep, side);
+}
+
+/** Test hook. */
+export function _resetCueMemory(): void {
+  seen.clear();
 }
 
 /**
  * The single clip key for an instant call-out after a rep. Pure code, never the LLM.
- * Priority: cheat > L/R imbalance > too fast up > rep count.
+ * Priority: cheat > L/R imbalance (2 reps in a row, same side, both arms curled) > too fast up > rep count.
  */
 export function pickCue(rep: RepEvent, opts: PickCueOptions = {}): string | null {
   if (!rep || rep.type !== "rep") return null;
+  const side = repImbalance(rep);
+  remember(rep, side);
   if (rep.cheat) return opts.variant === "preacher" ? "elbows_in" : "delt_took_over";
-  if (rep.r_share != null && Number.isFinite(rep.r_share)) {
-    if (rep.r_share > CUE_CONFIG.rShareHigh) return "left_slacking";
-    if (rep.r_share < CUE_CONFIG.rShareLow) return "right_slacking";
+  if (side) {
+    if (opts.prevRep !== undefined) {
+      if (repImbalance(opts.prevRep) === side) return side;
+    } else {
+      // Once per streak: on the 2nd imbalanced rep in a row (same side), not again until it breaks.
+      const m = seen.get(rep.set_id)!;
+      let streak = 1;
+      while (m.get(rep.rep - streak) === side) streak++;
+      if (streak === 2) return side;
+    }
   }
   // Same "very fast up" definition the engine uses for slow_the_tempo (per variant, default 300 ms).
   const fastUpMs = thresholdsFor(DEFAULT_CONFIG, opts.variant ?? "standing").fastUpMs;

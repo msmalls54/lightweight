@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { coachDir, isWalkUpPerson, localDate } from "./context.js";
-import { decisionLine, r2, setFacts } from "./facts.js";
+import { decisionLine, plural, r2, setFacts } from "./facts.js";
 import type { SetEndEvent, Variant } from "./types.js";
 
 export interface SetMeta {
@@ -29,7 +29,7 @@ export function codeTakeaways(sets: SetEndEvent[]): string[] {
   sets.forEach((s, i) => {
     const f = setFacts(s);
     out.push(
-      `Set ${i + 1}: ${f.total_reps} reps, ${f.cheats} cheat${f.cheats === 1 ? "" : "s"}` +
+      `Set ${i + 1}: ${plural(f.total_reps, "rep")}, ${plural(f.cheats, "cheat")}` +
         (f.first_cheat_rep ? ` (first at rep ${f.first_cheat_rep})` : "") +
         (f.avg_delt_share != null ? `, avg delt share ${f.avg_delt_share}` : "") +
         `. ${decisionLine(s.decision?.next)}`,
