@@ -25,6 +25,8 @@ export interface RepEvent {
 export interface CoachDecision { next: "continue" | "stop_at_first_cheat_rest_longer" | "slow_the_tempo"; reason: string }
 export interface SetEndEvent {
   type: "set_end"; set_id: string; reps: RepEvent[]; clean: number; cheats: number; first_cheat_rep: number | null; decision: CoachDecision;
+  /** Additive: present when autoRaiseMvc raised the MVC from this set. Already applied; persist it if you store calibrations. */
+  calibration?: Calibration;
 }
 export type EngineEvent = LiveFrame | RepEvent | SetEndEvent;
 

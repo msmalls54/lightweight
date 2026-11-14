@@ -473,3 +473,37 @@ test("raising the MVC between sets rescales the learned reference (no false chea
   const clean = b.reps[0].up_delt_ratio!;
   assert.ok(Math.abs(ref - clean) / clean < 0.25, `ref ${ref} vs clean ${clean}`);
 });
+
+test("no reference yet: a high delt peak alone is never a cheat (only the strong rules apply)", () => {
+  // rep 1: big delt peak (0.95) but biceps-led on the way up and share < 0.6
+  const { end } = runSet(calibrated(), [{ bi: 1.2, delt: 0.95 }, ...presets.clean(2)]);
+  assert.equal(end.reps[0].baseline_delt_share, null);
+  assert.ok(end.reps[0].peak_pct[1] > 0.9);
+  assert.equal(end.reps[0].cheat, false);
+});
+
+test("a too-low biceps MVC doesn't merge reps (detection isn't clamped at 1.5)", () => {
+  // true peak 0.9 with the MVC set at a third of the real one: %MVC ~2.7, valleys ~0.45
+  const reps: SynthRep[] = Array.from({ length: 6 }, () => ({ bi: 0.9, delt: 0.1, upMs: 700, holdMs: 200, downMs: 700, gapMs: 0, tailMs: 300, tailLevel: 0.15 }));
+  const s = synth(reps, { rest: REST });
+  const e = new Engine({ autoRaiseMvc: false });
+  e.setCalibration({ rest: REST, mvc: [5270, 14960, 14960, 14960], ok: true, problems: [] });
+  e.startSet(CTX);
+  for (const b of toBatches(s.ch, s.hz)) e.ingest(b);
+  const end = e.endSet()!;
+  assert.equal(end.reps.length, 6);
+  assert.ok(end.reps.every((r) => r.peak_pct[0] === 1.5), "reported values still clamped");
+});
+
+test("autoRaiseMvc: set_end raises the MVC from the set itself (raise-only), off when disabled", () => {
+  const e = new Engine();
+  e.setCalibration({ rest: REST, mvc: [6000, 14960, 14960, 14960], ok: true, problems: [] });
+  const { end } = runSet(e, presets.clean(4), {}, { mvc: [14960, 14960, 14960, 14960] });
+  assert.ok(end.calibration && end.calibration.mvc[0] > 10_000, `raised to ${end.calibration?.mvc[0]}`);
+  assert.equal(end.calibration!.mvc[1], 14960);
+  assert.deepEqual(e.getCalibration()!.mvc, end.calibration!.mvc);
+  const off = new Engine({ autoRaiseMvc: false });
+  off.setCalibration({ rest: REST, mvc: [6000, 14960, 14960, 14960], ok: true, problems: [] });
+  assert.equal(runSet(off, presets.clean(4)).end.calibration, undefined);
+  assert.equal(off.getCalibration()!.mvc[0], 6000);
+});
