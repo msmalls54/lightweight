@@ -191,7 +191,7 @@ export class Pipeline {
       return;
     }
     const detail = withTimeout(summarizeSetDetail(ctx, e), 15_000)
-      .then(d => { this.hub.send({ type: "set_detail", set_id: e.set_id, set_no: setNo, detail: d }); })
+      .then(d => { this.store.saveSetDetail(e.set_id, d); this.hub.send({ type: "set_detail", set_id: e.set_id, set_no: setNo, detail: d }); })
       .catch(err => console.error("[coach] summarizeSetDetail failed:", errMsg(err)));
     try {
       const text = await withTimeout(summarizeSet(ctx, e), 12_000);
@@ -360,6 +360,10 @@ export class Pipeline {
   /** Ask open dashboards to run their calibration flow (MCP start_session). */
   requestCalibration() { this.hub.send({ type: "calibrate_request" }); }
   get sessionPerson() { return this.active?.person ?? "Mike"; }
+  /** Tell dashboards to refresh the workout timeline (e.g. a lift was logged without sensors). */
+  notifyWorkout() { this.hub.send({ type: "workout" }); }
+  /** For the workout timeline: the session on screen and its running set. */
+  get activeIds() { const s = this.active; return { session: s?.id, set: s?.set?.set_id, person: s && !s.isWalkUp ? s.person : "Mike" }; }
 
   stopSet() {
     const sess = this.liveOrDefault();

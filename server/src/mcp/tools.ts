@@ -51,16 +51,26 @@ export function registerTools(server: MCPServer, store: Store, pipeline: Pipelin
 
   server.tool({
     name: "log_exercise",
-    description: "Set the exercise, curl variant and weight for the next set (e.g. 'standing dumbbell curl, 35 lb'). Applies immediately if the current set has no reps yet. Variants: standing (DB/barbell/band), preacher, hammer.",
+    description: "Set the exercise, curl variant and weight for the next sensed set (e.g. 'standing dumbbell curl, 35 lb'). Applies immediately if the current set has no reps yet. Variants: standing (DB/barbell/band), preacher, hammer. If the user did a lift WITHOUT the sensors, pass reps (and sets): it is recorded for today's workout as 'logged, not sensed' and the next sensed set is unchanged.",
     schema: z.object({
       exercise: z.string().trim().min(1).max(60).describe("e.g. 'dumbbell curl', 'band curl', 'EZ bar preacher curl'"),
       variant: z.enum(["standing", "preacher", "hammer"]).default("standing"),
       load_lb: z.number().min(0).max(500).optional(),
       arms: z.array(z.enum(["R", "L"])).min(1).max(2).optional(),
+      reps: z.number().int().min(1).max(100).optional().describe("Only for a lift done without sensors: reps per set"),
+      sets: z.number().int().min(1).max(20).optional().describe("Only for a lift done without sensors: number of sets"),
+      note: z.string().max(200).optional(),
     }),
     annotations: RW,
   }, async a => {
-    try { return object({ ok: true, ...pipeline.logExercise(a) }); } catch (e) { return fail(e); }
+    try {
+      if (a.reps !== undefined) {
+        const id = store.logLift({ person: pipeline.sessionPerson, exercise: a.exercise, variant: a.variant, load_lb: a.load_lb, sets: a.sets, reps: a.reps, note: a.note });
+        pipeline.notifyWorkout();
+        return object({ ok: true, logged: true, id, note: "Recorded as logged, not sensed." });
+      }
+      return object({ ok: true, ...pipeline.logExercise({ exercise: a.exercise, variant: a.variant, load_lb: a.load_lb, arms: a.arms }) });
+    } catch (e) { return fail(e); }
   });
 
   server.tool({
