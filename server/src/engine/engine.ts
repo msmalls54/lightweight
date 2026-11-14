@@ -28,6 +28,8 @@ interface SetState {
   reps: RepEvent[];
   /** Raw samples of this set (for autoRaiseMvc at set end). */
   raw: number[][];
+  /** Detection-signal peak of each accepted rep (for the minPeakFrac guard). */
+  repPeaks: number[];
   /** Per-arm rep history (reps where that arm worked), for the reference. */
   armReps: Record<Arm, ArmRep[]>;
   phase: "idle" | "rep";
@@ -97,6 +99,7 @@ function rescaleRef(r: Ref, kb: number, kd: number): Ref {
  */
 function judge(cur: Ref, ref: Ref | null, th: RepThresholds): RepEvent["cheat_reason"] {
   if (ref === null) {
+    if (!th.flagWithoutReference) return null;
     return cur.upRatio > th.fallbackUpRatio || cur.share > th.fallbackShareMax ? "delt_share_jump" : null;
   }
   if (cur.upRatio >= ref.upRatio * th.upRatioMult && cur.upRatio - ref.upRatio >= th.upRatioJump) return "delt_share_jump";
@@ -162,6 +165,27 @@ export class Engine {
    * Raises the MVC from extra raw windows (e.g. the first strict set's samples) and applies it.
    * Same as setCalibration(raiseMvc(current, windows)). Returns the new calibration.
    */
+  /**
+   * Updates only the rest levels (e.g. from idle samples before a set), keeping the MVCs.
+   * Non-finite or implausible (> restMax) entries keep the old value. Rescales the learned references.
+   */
+  updateRest(rest: number[]): Calibration {
+    const cur = this.cal ?? {
+      rest: [0, 1, 2, 3].map(() => this.cfg.defaultRest),
+      mvc: [0, 1, 2, 3].map(() => this.cfg.defaultMvc),
+      ok: true,
+      problems: [],
+    };
+    const next: Calibration = {
+      ...cur,
+      rest: cur.rest.map((r, i) => (Number.isFinite(rest[i]) && rest[i] >= 0 && rest[i] <= this.cfg.restMax ? Math.round(rest[i]) : r)),
+      mvc: [...cur.mvc],
+      problems: [...cur.problems],
+    };
+    this.setCalibration(next);
+    return next;
+  }
+
   raiseMvc(windows: number[][][], percentile?: number): Calibration {
     const cur = this.cal ?? {
       rest: [0, 1, 2, 3].map(() => this.cfg.defaultRest),
@@ -188,6 +212,7 @@ export class Engine {
       reps: [],
       armReps: { R: [], L: [] },
       raw: [[], [], [], []],
+      repPeaks: [],
       phase: "idle",
       pre: [],
       rep: [],
@@ -295,6 +320,32 @@ export class Engine {
     }
   }
 
+  /** Rejects holds, over-long movements and small handling twitches (see config). */
+  private looksLikeCurl(s: SetState, w: Sample[], endT: number): boolean {
+    const { th } = s;
+    if (endT - w[0].t > th.maxRepMs) return false;
+    for (const arm of s.arms) {
+      const bi = ARM_CH[arm].bi;
+      const pk = Math.max(...w.map((p) => p.pct[bi]));
+      if (pk < th.hi) continue; // this arm didn't work
+      let plateau = 0; // time near the peak
+      let sustain = 0; // time above half the peak (a slow-ramping flex hold)
+      for (let i = 0; i < w.length; i++) {
+        const dt = (i + 1 < w.length ? w[i + 1].t : endT) - w[i].t;
+        if (w[i].pct[bi] >= th.plateauFrac * pk) plateau += dt;
+        if (w[i].pct[bi] >= th.sustainFrac * pk) sustain += dt;
+      }
+      if (plateau > th.maxPlateauMs || sustain > th.maxSustainMs) return false;
+    }
+    if (s.repPeaks.length > 0) {
+      const sorted = [...s.repPeaks].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const peak = Math.max(...w.map((p) => this.signal(s, p.pct)));
+      if (peak < th.minPeakFrac * median) return false;
+    }
+    return true;
+  }
+
   private endLevel(s: SetState): number {
     const { th } = s;
     return Math.max(th.lo, Math.min(th.endLevelMax, th.endPeakFrac * s.repPeak));
@@ -310,8 +361,10 @@ export class Engine {
     s.valley = Infinity;
     s.repPeak = 0;
     if (w.length === 0 || endT - w[0].t < s.th.minRepMs) return; // blip
+    if (!this.looksLikeCurl(s, w, endT)) return;
     const ev = this.scoreRep(s, w, endT);
     s.reps.push(ev);
+    s.repPeaks.push(Math.max(...w.map((p) => this.signal(s, p.pct))));
     s.lastRepEndT = endT;
     out?.push(ev);
   }
@@ -385,16 +438,15 @@ export class Engine {
   }
 
   /**
-   * This set's reference for an arm: once the arm has done `baselineReps` reps, the per-feature
-   * max over the unflagged ones among them (max, so a light warm-up rep 1 doesn't make rep 3 look
-   * like a cheat). Null before that, or if all of them were flagged.
+   * This set's reference for an arm: the per-feature max over the arm's first `baselineReps`
+   * unflagged, plausible reps (max, so a light warm-up rep 1 doesn't make rep 3 look like a cheat).
+   * Null until there are that many: one odd movement (a flex hold, picking up the dumbbells)
+   * must not become the reference on its own.
    */
   private setRef(s: SetState, arm: Arm): Ref | null {
-    const first = s.armReps[arm].slice(0, s.th.baselineReps);
-    if (first.length < s.th.baselineReps) return null;
     // A rep that would be a blatant cheat on its own is never the clean reference.
-    const clean = first.filter((r) => !r.flagged && plausibleRef(r, s.th));
-    if (clean.length === 0) return null;
+    const clean = s.armReps[arm].filter((r) => !r.flagged && plausibleRef(r, s.th)).slice(0, s.th.baselineReps);
+    if (clean.length < s.th.baselineReps) return null;
     return {
       share: Math.max(...clean.map((r) => r.share)),
       deltMean: Math.max(...clean.map((r) => r.deltMean)),

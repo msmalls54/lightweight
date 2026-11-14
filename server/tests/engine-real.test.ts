@@ -34,8 +34,8 @@ function batches(phase: string): Batch[] {
   return out;
 }
 
-function runPhase(phase: string): SetEndEvent {
-  const e = new Engine();
+function runPhase(phase: string, cfg: ConstructorParameters<typeof Engine>[0] = {}): SetEndEvent {
+  const e = new Engine(cfg);
   e.setCalibration({ rest: [570, 495, 550, 550], mvc: [14960, 14960, 14960, 14960], ok: true, problems: [] });
   e.startSet({ session_id: "bench", set_id: phase, person: "Mike", exercise: "standing band curl", variant: "standing", arms: ["R"] });
   for (const b of batches(phase)) e.ingest(b);
@@ -63,18 +63,26 @@ test("real strict curls: 3 reps, delt share ~0.10, no cheats", () => {
   assert.equal(set.decision.next, "continue");
 });
 
-test("real swing curls: 4 reps, flagged, delt share ~0.46", () => {
+test("real swing curls as their own session (default: no flags before a clean reference)", () => {
+  // The weakest case: a swing set with no clean set before it. Rep 2 (share 0.66) is blatant, so it's
+  // neither flagged (no reference yet) nor used as one. The reference needs 2 plausible reps
+  // (reps 1 and 3), so only rep 4 is judged. In one session after the strict set, all are caught.
   const set = runPhase("cheat_curls");
+  assert.equal(set.reps.length, 4);
+  assert.deepEqual(set.reps.map((r) => r.cheat), [false, false, false, true]);
+});
+
+test("real swing curls: 4 reps, flagged, delt share ~0.46 (flagWithoutReference)", () => {
+  const set = runPhase("cheat_curls", { flagWithoutReference: true });
   assert.equal(set.reps.length, 4);
   const share = mean(set.reps.map((r) => r.delt_share));
   assert.ok(Math.abs(share - 0.46) < 0.06, `mean delt_share ${share}`);
-  // Rep 1 is borderline (share ~0.2, delt peak ~0.35: a light swing); reps 2-4 are clear swings.
-  assert.ok(set.cheats >= 3, `cheats ${set.cheats}`);
-  assert.deepEqual(set.reps.slice(1).map((r) => r.cheat), [true, true, true]);
+  // Strong no-reference rule catches rep 2 (share 0.66); rep 4 is caught against the reference (reps 1+3).
+  assert.deepEqual(set.reps.map((r) => r.cheat), [false, true, false, true]);
   assert.equal(set.first_cheat_rep, 2);
-  // 3 cheat reps > plan's max of 1 per set
+  // 2 cheat reps > plan's max of 1 per set
   assert.equal(set.decision.next, "stop_at_first_cheat_rest_longer");
-  assert.match(set.decision.reason, /^3 cheat reps \(first at rep 2\)/);
+  assert.match(set.decision.reason, /^2 cheat reps \(first at rep 2\)/);
   // swing reps use less biceps than strict ones (momentum did the work)
   const strict = runPhase("strict_curls");
   assert.ok(mean(set.reps.map((r) => r.mean_pct[0])) < mean(strict.reps.map((r) => r.mean_pct[0])));

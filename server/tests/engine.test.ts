@@ -68,8 +68,15 @@ test("rep windows line up with the ground truth", () => {
   });
 });
 
-test("blatant swing set: every rep flagged from rep 1, even with no clean reference", () => {
+test("default: no cheat flag before a clean reference exists, even on blatant swings", () => {
   const { end } = runSet(calibrated(), presets.swing(5));
+  assert.equal(end.reps.length, 5);
+  assert.equal(end.cheats, 0);
+  assert.ok(end.reps.every((r) => r.baseline_delt_share === null)); // blatant reps never become the reference
+});
+
+test("flagWithoutReference: blatant swing set flagged from rep 1 by the strong rules", () => {
+  const { end } = runSet(calibrated({ flagWithoutReference: true }), presets.swing(5));
   assert.equal(end.reps.length, 5);
   assert.equal(end.cheats, 5);
   assert.equal(end.first_cheat_rep, 1);
@@ -163,8 +170,8 @@ test("milder heavy swing: whole-rep rules miss some, the up-phase rule gets all"
   assert.ok(full.reps.slice(3).every((r) => r.delt_share - r.baseline_delt_share! < 0.15)); // share barely moves
 });
 
-test("no reference yet: a swing with delt above biceps on the way up is still flagged", () => {
-  const { end } = runSet(calibrated(), presets.heavySwingUp(3), { load_lb: 35 });
+test("flagWithoutReference: a swing with delt above biceps on the way up is flagged with no reference", () => {
+  const { end } = runSet(calibrated({ flagWithoutReference: true }), presets.heavySwingUp(3), { load_lb: 35 });
   assert.equal(end.cheats, 3);
   assert.equal(end.reps[0].baseline_up_delt_ratio, null);
 });
@@ -433,7 +440,7 @@ test("endSet keeps a long-enough rep still in progress", () => {
   const e = calibrated();
   const s = synth([{ bi: 0.8, upMs: 600, holdMs: 3000 }], { tailMs: 0 });
   e.startSet(CTX);
-  const n = Math.round(((1000 + 600 + 1500) * s.hz) / 1000); // stop mid-hold
+  const n = Math.round(((1000 + 600 + 800) * s.hz) / 1000); // stop mid-hold (before it counts as a hold)
   for (const b of toBatches(s.ch.map((c) => c.slice(0, n)), s.hz)) e.ingest(b);
   const end = e.endSet()!;
   assert.equal(end.reps.length, 1);

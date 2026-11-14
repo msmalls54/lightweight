@@ -17,6 +17,16 @@ export interface RepThresholds {
   endLevelMax: number;
   /** A new rep starts at max(hi, valley since the last rep + restartRise). */
   restartRise: number;
+  /** Longer "reps" are discarded (calibration holds, carrying the dumbbells). */
+  maxRepMs: number;
+  /** A "rep" whose working biceps stays >= plateauFrac x its peak longer than this is a hold, not a curl. */
+  maxPlateauMs: number;
+  plateauFrac: number;
+  /** ...or stays >= sustainFrac x its peak longer than this (a slow-ramping flex hold). Generous, so slow-tempo reps still count. */
+  maxSustainMs: number;
+  sustainFrac: number;
+  /** A rep whose biceps peak is below this x the median peak of the set's reps so far is discarded (handling twitch). */
+  minPeakFrac: number;
   /** Reps shorter than this (onset above `lo` → end) are discarded as blips. */
   minRepMs: number;
   /** After a rep ends, a new rep can't start for this long (refractory). */
@@ -27,7 +37,12 @@ export interface RepThresholds {
   upRatioMult: number;
   /** ...and at least this much above it (both must hold). */
   upRatioJump: number;
-  /** No reference yet: flag an up-phase delt/biceps ratio above this. */
+  /**
+   * Flag reps when there is no clean reference yet (only the strong rules below)? Off by default:
+   * with a stale or default calibration the first reps can't be judged fairly.
+   */
+  flagWithoutReference: boolean;
+  /** No reference yet (and flagWithoutReference): flag an up-phase delt/biceps ratio above this. */
   fallbackUpRatio: number;
   /** Cheat: delt_share above the clean reference by more than this. */
   deltShareJump: number;
@@ -102,11 +117,20 @@ export const DEFAULT_CONFIG: EngineConfig = {
   restartRise: 0.2,
   // Spec says ~0.6 s. The real swing rep 2 (Nov 13) is only 0.50 s above lo, so 0.4 s.
   minRepMs: 400,
+  // Real reps in all four recordings: <= 2.1 s, plateau <= 1.1 s. Holds: plateau 2.1-3.5 s, 2.4-4.6 s long.
+  maxRepMs: 4000,
+  maxPlateauMs: 1500,
+  plateauFrac: 0.8,
+  // Real reps: >= 50% of peak for <= 1.44 s. Holds: 2.15-4.2 s.
+  maxSustainMs: 2500,
+  sustainFrac: 0.5,
+  minPeakFrac: 0.5,
   minGapMs: 400,
   // Cheat flag (tuned on the Nov 13 band CSV and the two Nov 14 35 lb CSVs).
   upPhaseFrom: 0.3,
   upRatioMult: 1.35,
   upRatioJump: 0.15,
+  flagWithoutReference: false,
   fallbackUpRatio: 1.2,
   deltShareJump: 0.15,
   deltMeanRatio: 1.5,
@@ -159,10 +183,17 @@ export function thresholdsFor(cfg: EngineConfig, variant: Variant): RepThreshold
     endLevelMax: o.endLevelMax ?? cfg.endLevelMax,
     restartRise: o.restartRise ?? cfg.restartRise,
     minRepMs: o.minRepMs ?? cfg.minRepMs,
+    maxRepMs: o.maxRepMs ?? cfg.maxRepMs,
+    maxPlateauMs: o.maxPlateauMs ?? cfg.maxPlateauMs,
+    plateauFrac: o.plateauFrac ?? cfg.plateauFrac,
+    maxSustainMs: o.maxSustainMs ?? cfg.maxSustainMs,
+    sustainFrac: o.sustainFrac ?? cfg.sustainFrac,
+    minPeakFrac: o.minPeakFrac ?? cfg.minPeakFrac,
     minGapMs: o.minGapMs ?? cfg.minGapMs,
     upPhaseFrom: o.upPhaseFrom ?? cfg.upPhaseFrom,
     upRatioMult: o.upRatioMult ?? cfg.upRatioMult,
     upRatioJump: o.upRatioJump ?? cfg.upRatioJump,
+    flagWithoutReference: o.flagWithoutReference ?? cfg.flagWithoutReference,
     fallbackUpRatio: o.fallbackUpRatio ?? cfg.fallbackUpRatio,
     deltShareJump: o.deltShareJump ?? cfg.deltShareJump,
     deltMeanRatio: o.deltMeanRatio ?? cfg.deltMeanRatio,

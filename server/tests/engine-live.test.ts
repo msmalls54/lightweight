@@ -16,7 +16,7 @@ const T0 = rows[0][0];
 const LIVE_CAL: Calibration = { rest: [573, 477, 735, 631], mvc: [5118, 14303, 14857, 12969], ok: true, problems: [] };
 
 /** Replays like the server: 40-sample batches, first set armed after calibration (t=50 s), re-armed after each set_end. */
-function replay(cal: Calibration, cfg = { autoEndMs: 30_000 }) {
+function replay(cal: Calibration, cfg: ConstructorParameters<typeof Engine>[0] = { autoEndMs: 30_000 }) {
   const e = new Engine(cfg);
   e.setCalibration(cal);
   const sets: SetEndEvent[] = [];
@@ -79,8 +79,8 @@ test("live run 1: the MVC raises itself from the first set, and the stale refere
   assert.equal(sets[1].reps[0].baseline_up_delt_ratio, null);
 });
 
-test("live run 1 with a correct biceps MVC: the delt-led rep 1 is a cheat by the strong no-reference rule", () => {
-  const { sets } = replay({ ...LIVE_CAL, mvc: [14000, 14303, 14857, 12969] });
+test("live run 1 with a correct biceps MVC + flagWithoutReference: the delt-led rep 1 is a cheat by the strong rule", () => {
+  const { sets } = replay({ ...LIVE_CAL, mvc: [14000, 14303, 14857, 12969] }, { autoEndMs: 30_000, flagWithoutReference: true });
   const r1 = sets[0].reps[0];
   assert.ok(Math.abs(sec(r1.start_ms) - 57.7) < 0.5);
   assert.equal(r1.baseline_delt_share, null);
@@ -93,4 +93,47 @@ test("live run 1 with a correct biceps MVC: the delt-led rep 1 is a cheat by the
 test("autoEndMs controls the automatic set end", () => {
   assert.equal(replay(LIVE_CAL, { autoEndMs: 30_000 }).sets.filter((s) => s.reps.length > 0).length, 2);
   assert.equal(replay(LIVE_CAL, { autoEndMs: 10_000 }).sets.filter((s) => s.reps.length > 0).length, 3);
+});
+
+const DEFAULT_CAL: Calibration = { rest: [550, 550, 550, 550], mvc: [14960, 14960, 14960, 14960], ok: true, problems: [] };
+
+test("live run 1 with the DEFAULT calibration (walk-up / no calibration): sane reps, rep 1 not flagged", () => {
+  const { sets, reps } = replay(DEFAULT_CAL);
+  // Mike's ~4 real curls (R, ~57.8 / 61.7 / 68.5 / 82.5 s) are all found
+  const starts = reps.map((r) => sec(r.start_ms));
+  for (const t of [57.8, 61.7, 68.5, 82.5]) assert.ok(starts.some((x) => Math.abs(x - t) < 0.5), `curl at ~${t}s; got ${starts.map((x) => x.toFixed(1)).join(", ")}`);
+  for (const r of reps) {
+    const d = (r.end_ms - r.start_ms) / 1000;
+    assert.ok(d >= 0.4 && d <= 2.5, `rep at ${sec(r.start_ms).toFixed(1)}s lasts ${d.toFixed(2)}s`);
+  }
+  assert.equal(sets[0].reps[0].baseline_delt_share, null);
+  assert.equal(sets[0].reps[0].cheat, false);
+  assert.equal(reps.filter((r) => r.cheat).length, 0);
+});
+
+test("live run 1: calibration holds armed as a set are not counted as reps", () => {
+  // Arm the set from t=0 so the calibration flex / raise holds (31-47 s) fall inside it.
+  const e = new Engine({ autoEndMs: 30_000 });
+  e.setCalibration(DEFAULT_CAL);
+  e.startSet({ session_id: "x", set_id: "cal", person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R", "L"] });
+  const reps: number[] = [];
+  for (let i = 0; i < rows.length && rows[i][0] - T0 < 50_000; i += 40) {
+    const b = rows.slice(i, i + 40);
+    for (const ev of e.ingest({ device: "d", seq: i, t0_ms: b[0][0], dt_ms: 5, ch: [1, 2, 3, 4].map((c) => b.map((r) => r[c])) })) {
+      if (ev.type === "rep") reps.push(sec(ev.start_ms));
+    }
+  }
+  const end = e.endSet();
+  // the L biceps flex hold at ~40 s (plateau 2.3 s) is rejected; what's left are the R flex and the raise/curl transitions
+  assert.ok(!reps.some((t) => Math.abs(t - 39.9) < 1), `hold counted: ${reps.join(", ")}`);
+  assert.ok((end?.reps ?? []).every((r) => r.end_ms - r.start_ms <= 4000));
+});
+
+test("updateRest changes only the rest levels and keeps the session reference consistent", () => {
+  const e = new Engine();
+  e.setCalibration(LIVE_CAL);
+  const c = e.updateRest([600, 500, Number.NaN, 99_999]);
+  assert.deepEqual(c.rest, [600, 500, 735, 631]); // NaN and implausible values keep the old rest
+  assert.deepEqual(c.mvc, LIVE_CAL.mvc);
+  assert.deepEqual(e.getCalibration()!.rest, [600, 500, 735, 631]);
 });
