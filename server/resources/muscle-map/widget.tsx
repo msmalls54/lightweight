@@ -1,0 +1,159 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { McpUseProvider, useWidget, type WidgetMetadata } from "mcp-use/react";
+import type { MuscleMapView, RepView, compareArms } from "../../src/mcp/data.js";
+import { ANTERIOR } from "./anterior.js";
+
+export const widgetMetadata: WidgetMetadata = {
+  title: "Lightweight: muscle map",
+  description: "Front-body map of the 4 sensed muscles (L/R biceps, L/R front delt) shaded by %MVC, with a per-rep scrubber and cheat reps in red.",
+  exposeAsTool: false,
+};
+
+type ArmsCompare = NonNullable<ReturnType<typeof compareArms>>;
+type Props = Partial<MuscleMapView> & { empty?: boolean; mode?: "set" | "arms"; arms_compare?: ArmsCompare };
+type View = "rep" | "set" | "session";
+
+// Channel order everywhere: 0 R biceps, 1 R front delt, 2 L biceps, 3 L front delt.
+const TRACKED: Record<string, number> = { "biceps/right": 0, "front-deltoids/right": 1, "biceps/left": 2, "front-deltoids/left": 3 };
+const CH_LABEL = ["R biceps", "R front delt", "L biceps", "L front delt"];
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+function heat(v: number, dark: boolean) {
+  const t = Math.max(0, Math.min(1, v));
+  const a = dark ? [58, 64, 78] : [226, 222, 216], b = [229, 57, 53];
+  return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`;
+}
+
+/** One entry per rep number; a rep is a cheat if either arm cheated. Shading = max peak over arms. */
+function groupReps(reps: RepView[]) {
+  const m = new Map<number, { rep: number; cheat: boolean; peak: number[]; events: RepView[] }>();
+  for (const r of reps) {
+    const g = m.get(r.rep) ?? { rep: r.rep, cheat: false, peak: [0, 0, 0, 0], events: [] };
+    g.cheat ||= r.cheat;
+    g.peak = g.peak.map((v, i) => Math.max(v, r.peak_pct[i] ?? 0));
+    g.events.push(r);
+    m.set(r.rep, g);
+  }
+  return [...m.values()].sort((a, b) => a.rep - b.rep);
+}
+
+function Body({ values, dark, arms }: { values: number[]; dark: boolean; arms: string[] }) {
+  const untracked = dark ? "#2a2f3a" : "#d4d0ca", edge = dark ? "#11141a" : "#f6f3ee";
+  return <svg viewBox="-6 -4 112 208" width="200" height="372" role="img" style={{ display: "block", flex: "none" }}
+    aria-label={`Muscle map. ${CH_LABEL.map((l, i) => `${l} ${pct(values[i] ?? 0)}`).join(", ")}. Gray muscles are not measured.`}>
+    {ANTERIOR.map((s, i) => {
+      const ch = TRACKED[`${s.muscle}/${s.side}`];
+      const used = ch !== undefined && arms.includes(ch < 2 ? "R" : "L");
+      return <polygon key={i} points={s.points} fill={ch === undefined ? untracked : used ? heat(values[ch] ?? 0, dark) : untracked}
+        stroke={ch === undefined ? edge : dark ? "#9aa3b5" : "#6b6258"} strokeWidth={ch === undefined ? 0.3 : 0.6} style={{ transition: "fill .3s" }} />;
+    })}
+    <text x="4" y="30" fontSize="9" fontWeight="700" fill={dark ? "#8a93a6" : "#7a7268"} textAnchor="middle">R</text>
+    <text x="96" y="30" fontSize="9" fontWeight="700" fill={dark ? "#8a93a6" : "#7a7268"} textAnchor="middle">L</text>
+  </svg>;
+}
+
+function MuscleMap({ p, dark }: { p: Props; dark: boolean }) {
+  const reps = useMemo(() => groupReps(p.reps ?? []), [p.reps]);
+  const [view, setView] = useState<View>("set");
+  const [idx, setIdx] = useState<number | null>(null);
+  const sel = reps.length ? reps[Math.min(idx ?? reps.length - 1, reps.length - 1)] : null;
+  const fg = dark ? "#eef0f5" : "#1f2329", dim = dark ? "#8a93a6" : "#6f6a62", bg = dark ? "#151922" : "#faf8f5", line = dark ? "#2a3140" : "#e4dfd8";
+  const red = "#e53935", green = "#2e9e5b";
+  if (p.empty || !p.set) {
+    return <div style={{ padding: 24, background: bg, color: fg, borderRadius: 14, fontFamily: "Segoe UI, system-ui, sans-serif" }}>
+      <div style={{ fontSize: 20, fontWeight: 700 }}>Lightweight</div><div style={{ color: dim }}>No sets yet. Put the sensors on and curl.</div></div>;
+  }
+  const s = p.set, arms = p.arms ?? ["R", "L"];
+  const values = view === "rep" && sel ? sel.peak : view === "session" ? p.views!.session : p.views!.set;
+  const tab = (v: View, label: string) => <button key={v} onClick={() => setView(v)} style={{
+    padding: "4px 12px", borderRadius: 999, border: `1px solid ${view === v ? fg : line}`, background: view === v ? fg : "transparent",
+    color: view === v ? bg : fg, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>{label}</button>;
+  const ac = p.arms_compare;
+  return <div style={{ background: bg, color: fg, borderRadius: 14, padding: 18, fontFamily: "Segoe UI, system-ui, sans-serif", border: `1px solid ${line}`, maxWidth: 720 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+      <div>
+        <div style={{ fontSize: 13, color: dim, fontWeight: 600 }}>{p.replay_of ? "Replayed session" : p.walkup ? "Walk-up" : "Session"} · set {s.set_no}{p.sets && p.sets.length > 1 ? ` of ${p.sets.length}` : ""}</div>
+        <div style={{ fontSize: 26, fontWeight: 800 }}>{p.person}</div>
+        <div style={{ fontSize: 15, color: dim }}>{s.exercise} · {s.variant}{s.load_lb != null ? ` · ${s.load_lb} lb` : ""}</div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <span style={{ padding: "6px 12px", borderRadius: 10, background: green, color: "#fff", fontWeight: 800 }}>{s.clean} clean</span>
+        <span style={{ padding: "6px 12px", borderRadius: 10, background: s.cheats ? red : line, color: s.cheats ? "#fff" : dim, fontWeight: 800 }}>{s.cheats} cheat</span>
+      </div>
+    </div>
+
+    <div style={{ display: "flex", gap: 18, marginTop: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <Body values={values} dark={dark} arms={arms} />
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>{tab("rep", "Rep")}{tab("set", "Set")}{tab("session", "Session")}</div>
+        <div style={{ fontSize: 12, color: dim, marginBottom: 6 }}>Peak %MVC · {view === "rep" && sel ? `rep ${sel.rep}` : view === "set" ? `avg per rep, set ${s.set_no}` : "avg per rep, whole session"}</div>
+        {CH_LABEL.map((l, i) => {
+          const used = arms.includes(i < 2 ? "R" : "L");
+          const v = values[i] ?? 0;
+          return <div key={l} style={{ display: "grid", gridTemplateColumns: "100px 1fr 44px", alignItems: "center", gap: 8, marginBottom: 6, opacity: used ? 1 : 0.4 }}>
+            <span style={{ fontSize: 14 }}>{l}</span>
+            <span style={{ height: 10, background: line, borderRadius: 6, overflow: "hidden" }}>
+              <span style={{ display: "block", height: "100%", width: `${Math.min(100, (v / 1.2) * 100)}%`, background: i % 2 ? "#f08a3c" : "#3d8bfd" }} />
+            </span>
+            <span style={{ fontSize: 14, fontWeight: 700, textAlign: "right" }}>{used ? pct(v) : "off"}</span>
+          </div>;
+        })}
+
+        <div style={{ fontSize: 12, color: dim, margin: "14px 0 6px" }}>Reps (tap to scrub)</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {reps.map((r, i) => <button key={r.rep} onClick={() => { setIdx(i); setView("rep"); }} title={r.cheat ? "delt took over" : "clean"} style={{
+            width: 36, height: 36, borderRadius: 8, fontWeight: 800, cursor: "pointer", color: "#fff",
+            background: r.cheat ? red : green, border: sel?.rep === r.rep && view === "rep" ? `3px solid ${fg}` : "3px solid transparent" }}>{r.rep}</button>)}
+        </div>
+        {reps.length > 1 && <input type="range" min={0} max={reps.length - 1} value={Math.min(idx ?? reps.length - 1, reps.length - 1)}
+          onChange={e => { setIdx(Number(e.target.value)); setView("rep"); }} style={{ width: "100%", marginTop: 8 }} aria-label="Rep scrubber" />}
+        {sel && view === "rep" && <div style={{ marginTop: 8, fontSize: 14 }}>
+          {sel.events.map(e => <div key={e.arm}>
+            <b>Rep {e.rep}{arms.length > 1 ? ` ${e.arm === "R" ? "right" : "left"}` : ""}</b>: delt share {pct(e.delt_share)}{e.baseline_delt_share !== null ? ` (baseline ${pct(e.baseline_delt_share)})` : ""}
+            {e.cheat ? <b style={{ color: red }}> · {e.reason}</b> : <span style={{ color: green }}> · clean</span>}
+          </div>)}
+        </div>}
+        {s.coach_line && <div style={{ marginTop: 12, padding: "8px 12px", borderLeft: `3px solid #3d8bfd`, background: dark ? "#1c212c" : "#f0ece6", fontSize: 14 }}>{s.coach_line}</div>}
+      </div>
+    </div>
+
+    {ac && <div style={{ marginTop: 14, borderTop: `1px solid ${line}`, paddingTop: 12 }}>
+      <div style={{ fontSize: 13, color: dim, fontWeight: 600, marginBottom: 6 }}>
+        Biceps balance (right share) {ac.overall_r_share !== null ? `· overall ${pct(ac.overall_r_share)} R / ${pct(1 - ac.overall_r_share)} L · weaker: ${ac.weaker_arm}` : "· no two-arm sets"}
+      </div>
+      {ac.sets.map(r => <div key={r.set_no} style={{ display: "grid", gridTemplateColumns: "60px 1fr 90px", gap: 8, alignItems: "center", marginBottom: 6, fontSize: 14 }}>
+        <span>Set {r.set_no}</span>
+        <span style={{ position: "relative", height: 14, background: line, borderRadius: 7, overflow: "hidden" }}>
+          <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${(r.r_share ?? 0.5) * 100}%`, background: r.flagged ? red : "#3d8bfd" }} />
+          <span style={{ position: "absolute", left: "50%", top: -2, bottom: -2, borderLeft: `2px solid ${fg}` }} />
+        </span>
+        <span style={{ textAlign: "right", fontWeight: 700 }}>{r.r_share === null ? "n/a" : `${pct(r.r_share)} R`}{r.flagged ? " ⚠" : ""}</span>
+      </div>)}
+    </div>}
+    <div style={{ marginTop: 10, fontSize: 11, color: dim }}>Relative activation (%MVC from this session's calibration). Gray muscles are not measured. Not force, not medical.</div>
+  </div>;
+}
+
+export default function MuscleMapWidget() {
+  const { props, theme, callTool, isAvailable } = useWidget<Props>();
+  const [fresh, setFresh] = useState<Props | null>(null);
+  const action = useRef(callTool); action.current = callTool;
+  const tool = props?.mode === "arms" ? "compare_arms" : "show_last_set";
+  useEffect(() => {
+    // Keep refreshing while it shows the latest set, so a live set fills in.
+    if (!isAvailable || props?.selected_set_no != null) return;
+    let disposed = false, busy = false;
+    const refresh = async () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      try {
+        const r = await action.current(tool, {});
+        if (!disposed && !r.isError && r.structuredContent) setFresh(r.structuredContent as unknown as Props);
+      } catch { /* keep the last view */ } finally { busy = false; }
+    };
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [isAvailable, props?.selected_set_no, tool]);
+  const view = fresh ?? props ?? {};
+  return <McpUseProvider autoSize><MuscleMap p={view} dark={theme === "dark"} /></McpUseProvider>;
+}

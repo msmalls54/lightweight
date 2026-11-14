@@ -220,6 +220,7 @@
           else { $("coach").textContent = ""; playClip(e.fallback_clip); }
           break;
         case "calibration": onCalEvent(e); break;
+        case "calibrate_request": calibrate(); break;
         case "session":
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); $("coach").textContent = "";
           toast(`New session: ${e.person}${e.walkup ? " (walk-up)" : ""}`);

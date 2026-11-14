@@ -65,7 +65,7 @@ export class Pipeline {
 
   // ------------------------------------------------------------------ device input
   ingest(b: Batch): { duplicate: boolean } {
-    const sess = this.live ?? this.startSession({ person: "Mike", walkup: false, kind: "live" });
+    const sess = this.live ?? this.startSession({ person: "Mike", walkup: false, kind: b.device.startsWith("lw-fake") ? "fake" : "live" });
     const id = this.store.saveBatch(sess.id, b);
     if (id === null) return { duplicate: true };
     sess.lastBatchId = id;
@@ -210,6 +210,21 @@ export class Pipeline {
     this.pushStatus();
     return sess.set!;
   }
+  /** Exercise/weight for the next set. Applies now if the armed set has no reps yet. */
+  logExercise(input: Partial<SetTemplate>) {
+    const sess = this.liveOrDefault();
+    const clean = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as Partial<SetTemplate>;
+    const tpl: SetTemplate = { ...(sess.armed ?? { ...DEFAULT_SET, arms: sess.arms }), ...clean };
+    if (!sess.set || sess.setNo === null) { this.cmdStartSet(sess, tpl); this.pushStatus(); return { applies: "now" as const, template: tpl }; }
+    this.log(sess, "set_next", tpl);
+    sess.armed = tpl;
+    this.pushStatus();
+    return { applies: "next_set" as const, template: tpl };
+  }
+  /** Ask open dashboards to run their calibration flow (MCP start_session). */
+  requestCalibration() { this.hub.send({ type: "calibrate_request" }); }
+  get sessionPerson() { return this.active?.person ?? "Mike"; }
+
   stopSet() {
     const sess = this.liveOrDefault();
     this.cmdStopSet(sess);
@@ -304,6 +319,7 @@ export class Pipeline {
   private applyEvent(sess: Sess, ev: { kind: string; payload: string }) {
     const p = JSON.parse(ev.payload);
     if (ev.kind === "set_start") { sess.armed = p; this.endCurrent(sess, false); sess.calibrating = false; this.arm(sess, p); }
+    else if (ev.kind === "set_next") { sess.armed = p; }
     else if (ev.kind === "set_stop") { sess.armed = null; this.endCurrent(sess, false); }
     else if (ev.kind === "cal_begin") { this.applyCalBegin(sess); this.hub.send({ type: "calibration", phase: "begin", arms: sess.arms, replay: true }); }
     else if (ev.kind === "calibration") { this.applyCalDone(sess, p); this.hub.send({ type: "calibration", phase: "done", ...p, replay: true }); }

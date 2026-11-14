@@ -9,6 +9,7 @@ import { Pipeline } from "./src/pipeline.js";
 import { addGuard, addReceiver } from "./src/receiver.js";
 import { addDashboard } from "./src/dashboard.js";
 import { initVoice, registerVoiceRoutes } from "./src/modules.js";
+import { registerTools } from "./src/mcp/tools.js";
 
 // Repo-root .env holds GEMINI_API_KEY. Never print it.
 const envFile = resolve(REPO_ROOT, ".env");
@@ -40,6 +41,7 @@ addGuard(server.app);
 addReceiver(server.app, lw.pipeline);
 registerVoiceRoutes(server.app);
 addDashboard(server.app, lw.pipeline, lw.store, lw.hub);
+registerTools(server, lw.store, lw.pipeline);
 
 export default server;
 
