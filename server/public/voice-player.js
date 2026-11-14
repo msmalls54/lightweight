@@ -285,6 +285,17 @@
     return false;
   }
 
+  var ttsInfo = {}; // text -> {provider, ms, after} from the server's x-lw-tts header
+  function parseTtsInfo(h) {
+    var out = {};
+    String(h || "").split(";").forEach(function (part, i) {
+      var kv = part.trim().split("=");
+      if (i === 0) out.provider = kv[0];
+      else if (kv[0] === "ms") out.ms = Number(kv[1]);
+      else if (kv[0] === "after") out.after = kv.slice(1).join("=");
+    });
+    return out;
+  }
   function fetchSay(text) {
     return fetch("/voice/say", {
       method: "POST",
@@ -293,6 +304,10 @@
     })
       .then(function (r) {
         if (!r.ok) throw new Error("say " + r.status);
+        try {
+          var h = r.headers && r.headers.get && r.headers.get("x-lw-tts");
+          if (h) ttsInfo[text] = parseTtsInfo(h);
+        } catch (e) {}
         return r.arrayBuffer();
       })
       .then(decode);
@@ -546,7 +561,12 @@
           return ok;
         });
       }, what).then(function (ok) {
-        if (ok && c.by === "gemini") report(setId, "gemini", waited);
+        if (ok && c.by === "gemini") {
+          // Which server provider made it: "gemini", or "elevenlabs" after "gemini timeout".
+          var info = ttsInfo[text] || {};
+          var tier = info.provider === "elevenlabs" ? "elevenlabs" : "gemini";
+          report(setId, tier, tier === "elevenlabs" && isFinite(info.ms) ? info.ms : waited, info.after || null);
+        }
         return ok;
       });
     },

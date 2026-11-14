@@ -3,13 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Hono } from "hono";
-import { loadGeminiKey } from "./env.js";
+import { loadElevenKey, loadGeminiKey } from "./env.js";
+import { buildSteps, runChain, ttsProviderMode, type TtsResult, type TtsStep } from "./chain.js";
+import { elevenSynth, isMp3 } from "./elevenlabs.js";
 import { SAY_TTS_MODELS, SAY_TTS_TIMEOUT_MS, SPOKEN_FIRST_SENTENCE_MAX_WORDS, TTS_MODEL, voiceId } from "./models.js";
 import { geminiSynth, type Synth } from "./tts.js";
 import { isWav, trimSilence } from "./wav.js";
 
 export { pcmToWav, ensureWav, isWav, trimSilence, wavDurationMs } from "./wav.js";
-export { loadGeminiKey } from "./env.js";
+export { loadGeminiKey, loadElevenKey } from "./env.js";
+export { ttsProviderMode, runChain, buildSteps, type TtsResult, type TtsStep, type TtsMode } from "./chain.js";
+export { elevenSynth, isMp3, pickCoachVoice, ELEVEN_MODEL, ELEVEN_DOCS_EXAMPLE_VOICE } from "./elevenlabs.js";
 export type { Synth } from "./tts.js";
 
 const NUMBERS = [
@@ -70,11 +74,22 @@ interface ClipMeta {
   text: string;
   voice: string;
   model: string;
+  /** "gemini" | "elevenlabs" (older entries: gemini). */
+  provider?: string;
   /** Leading/trailing silence already trimmed. */
   trimmed?: boolean;
 }
 
-const state: { synth?: Synth; synthIsGemini?: boolean; saySynth?: Synth; cacheDir: string; ready: boolean; failed: string[] } = {
+const state: {
+  synth?: Synth;
+  synthIsGemini?: boolean;
+  saySynth?: Synth;
+  /** ElevenLabs synth (null = no ELEVENLABS_API_KEY; undefined = not built yet). Tests inject one. */
+  eleven?: (Synth & { voice?: () => Promise<string> }) | null;
+  cacheDir: string;
+  ready: boolean;
+  failed: string[];
+} = {
   cacheDir: DEFAULT_VOICE_CACHE,
   ready: false,
   failed: [],
@@ -94,6 +109,33 @@ function readManifest(): Record<string, ClipMeta> {
   } catch {
     return {};
   }
+}
+
+/** ElevenLabs if ELEVENLABS_API_KEY is set, else null (then everything behaves as Gemini-only). */
+function getEleven(): (Synth & { voice?: () => Promise<string> }) | null {
+  if (state.eleven !== undefined) return state.eleven;
+  const key = loadElevenKey();
+  state.eleven = key ? elevenSynth({ apiKey: key }) : null;
+  return state.eleven;
+}
+
+async function elevenVoiceId(): Promise<string> {
+  try {
+    return (await getEleven()?.voice?.()) ?? "elevenlabs";
+  } catch {
+    return "elevenlabs";
+  }
+}
+
+/** Clip generation chain: Gemini (TTS_MODEL first), then ElevenLabs; `only` forces one provider. */
+function clipSteps(only?: string): TtsStep[] {
+  const gemini = state.synth ?? (loadGeminiKey() ? getSynth() : undefined);
+  const name = state.synth && !state.synthIsGemini ? "test" : "gemini";
+  const g = gemini ? [{ name, synth: gemini }] : [];
+  const e = getEleven() ? [{ name: "elevenlabs", synth: getEleven()! }] : [];
+  if (only === "elevenlabs") return e;
+  if (only === "gemini") return g;
+  return [...g, ...e];
 }
 
 function getSynth(): Synth {
@@ -126,6 +168,10 @@ export interface InitVoiceOptions {
   /** Tries per clip (default 2) and the first backoff in ms (doubles each retry, default 1500). */
   attempts?: number;
   backoffMs?: number;
+  /** "elevenlabs": (re)generate every clip with ElevenLabs only, so the clips are one voice. */
+  provider?: "gemini" | "elevenlabs";
+  /** Inject an ElevenLabs synth (tests). null = pretend there's no key. */
+  elevenlabs?: Synth | null;
   log?: (msg: string) => void;
 }
 
@@ -134,11 +180,28 @@ export interface InitVoiceOptions {
  * voice are skipped, so restarts are instant. A clip that fails is logged and retried on demand
  * by the clip route; it never throws the whole init.
  */
+export interface InitVoiceReport {
+  generated: number;
+  failed: string[];
+  /** Characters sent per provider (ElevenLabs bills by characters). */
+  chars: Record<string, number>;
+  byProvider: Record<string, number>;
+  ms: number;
+}
+
 export async function initVoice(opts: InitVoiceOptions): Promise<void> {
+  await warmVoice(opts);
+}
+
+/** initVoice plus a report (generated, failed, characters per provider, time). Used by `npm run voice:warm`. */
+export async function warmVoice(opts: InitVoiceOptions): Promise<InitVoiceReport> {
   state.cacheDir = opts.cacheDir;
-  state.synth = opts.synth ?? geminiSynth({ apiKey: opts.apiKey });
+  state.synth = opts.synth ?? (opts.apiKey ? geminiSynth({ apiKey: opts.apiKey }) : undefined);
   state.synthIsGemini = !opts.synth;
   state.saySynth = undefined;
+  // Tests inject a synth: never reach the real ElevenLabs API unless they inject one too.
+  if (opts.elevenlabs !== undefined) state.eleven = opts.elevenlabs;
+  else if (opts.synth) state.eleven = null;
   state.failed = [];
   const log = opts.log ?? ((m: string) => console.log(`[voice] ${m}`));
   fs.mkdirSync(state.cacheDir, { recursive: true });
@@ -146,10 +209,15 @@ export async function initVoice(opts: InitVoiceOptions): Promise<void> {
   const manifest = readManifest();
   const voice = voiceId();
   const keys = opts.keys ?? Object.keys(CLIPS);
+  const steps = clipSteps(opts.provider);
+  if (opts.provider === "elevenlabs" && !steps.length) throw new Error("ELEVENLABS_API_KEY not set (repo-root .env)");
   const todo = keys.filter((k) => {
     const m = manifest[k];
     const f = clipPath(k);
-    const cached = m && m.text === CLIPS[k] && m.voice === voice && fs.existsSync(f) && fs.statSync(f).size > 44;
+    const provider = m?.provider ?? "gemini";
+    // An ElevenLabs clip stays valid in auto mode (it was the fallback); --provider forces one voice.
+    const sameVoice = opts.provider ? provider === opts.provider : provider === "elevenlabs" || m?.voice === voice;
+    const cached = m && m.text === CLIPS[k] && sameVoice && fs.existsSync(f) && fs.statSync(f).size > 44;
     if (cached && !m.trimmed) {
       // Clip cached before silence trimming existed: trim in place instead of regenerating.
       fs.writeFileSync(f, trimSilence(fs.readFileSync(f)));
@@ -159,13 +227,26 @@ export async function initVoice(opts: InitVoiceOptions): Promise<void> {
   });
 
   const t0 = Date.now();
+  const chars: Record<string, number> = {};
+  const byProvider: Record<string, number> = {};
   await pool(todo, opts.concurrency ?? 4, async (key) => {
     const attempts = Math.max(1, opts.attempts ?? 2);
     for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
-        const wav = trimSilence(await state.synth!(CLIPS[key]));
+        // Gemini first; if it errors or times out, ElevenLabs (when configured).
+        const res = await runChain(steps, CLIPS[key]);
+        const wav = trimSilence(res.wav);
         fs.writeFileSync(clipPath(key), wav);
-        manifest[key] = { text: CLIPS[key], voice, model: TTS_MODEL, trimmed: true };
+        const eleven = res.provider === "elevenlabs";
+        manifest[key] = {
+          text: CLIPS[key],
+          voice: eleven ? await elevenVoiceId() : voice,
+          model: eleven ? process.env.ELEVENLABS_MODEL_ID ?? "eleven_flash_v2_5" : TTS_MODEL,
+          provider: res.provider === "test" ? "gemini" : res.provider,
+          trimmed: true,
+        };
+        byProvider[res.provider] = (byProvider[res.provider] ?? 0) + 1;
+        if (eleven) chars.elevenlabs = (chars.elevenlabs ?? 0) + CLIPS[key].length;
         return;
       } catch (e) {
         if (attempt === attempts) {
@@ -177,10 +258,14 @@ export async function initVoice(opts: InitVoiceOptions): Promise<void> {
   });
   fs.writeFileSync(manifestPath(), JSON.stringify(manifest, null, 1));
   state.ready = true;
+  const ms = Date.now() - t0;
+  const by = Object.entries(byProvider).map(([k, v]) => `${k} ${v}`).join(", ");
   log(
-    `${keys.length - todo.length} cached, ${todo.length - state.failed.length} generated in ${Date.now() - t0} ms` +
+    `${keys.length - todo.length} cached, ${todo.length - state.failed.length} generated in ${ms} ms` +
+      (by ? ` (${by})` : "") +
       (state.failed.length ? `, ${state.failed.length} failed: ${state.failed.join(", ")}` : ""),
   );
+  return { generated: todo.length - state.failed.length, failed: [...state.failed], chars, byProvider, ms };
 }
 
 /** Cached WAV for a clip key, generating it now if it's missing. null for unknown keys. */
@@ -188,7 +273,7 @@ export async function getClip(key: string): Promise<Buffer | null> {
   if (!(key in CLIPS)) return null;
   const f = clipPath(key);
   if (fs.existsSync(f)) return fs.readFileSync(f);
-  const wav = trimSilence(await getSynth()(CLIPS[key]));
+  const wav = trimSilence((await runChain(clipSteps(), CLIPS[key])).wav);
   fs.mkdirSync(state.cacheDir, { recursive: true });
   fs.writeFileSync(f, wav);
   return wav;
@@ -215,9 +300,9 @@ export function voiceStatus() {
   return { ready: state.ready, cacheDir: state.cacheDir, clips: Object.keys(CLIPS).length, failed: [...state.failed] };
 }
 
-const sayCache = new Map<string, Buffer>();
+const sayCache = new Map<string, TtsResult>();
 
-const sayInFlight = new Map<string, Promise<Buffer>>();
+const sayInFlight = new Map<string, Promise<TtsResult>>();
 const CLIP_BY_TEXT = new Map(Object.entries(CLIPS).map(([k, v]) => [v, k]));
 
 /** Build id of the dashboard's JS (hash of public/app.js, voice-player.js, index.html, read now). */
@@ -234,14 +319,19 @@ export function dashboardBuild(): string {
   return h.digest("hex").slice(0, 10);
 }
 
-/** Live TTS: SAY_TTS_MODELS order with a short per-model timeout (tests inject via initVoice's synth). */
-function getSaySynth(): Synth {
+/** Live TTS Gemini synth: SAY_TTS_MODELS order with a short per-model timeout (tests inject via initVoice). */
+function getSaySynth(): Synth | undefined {
   if (state.saySynth) return state.saySynth;
   if (state.synth && !state.synthIsGemini) return state.synth; // injected (tests)
   const apiKey = loadGeminiKey();
-  if (!apiKey) throw new Error("GEMINI_API_KEY not set (repo-root .env)");
+  if (!apiKey) return undefined;
   state.saySynth = geminiSynth({ apiKey, models: SAY_TTS_MODELS, timeoutMs: SAY_TTS_TIMEOUT_MS });
   return state.saySynth;
+}
+
+/** Live summaries/answers: LW_TTS_PROVIDER (auto: Gemini, then ElevenLabs when Gemini errors or times out). */
+function saySteps(): TtsStep[] {
+  return buildSteps(ttsProviderMode(), getSaySynth(), getEleven() ?? undefined);
 }
 
 /**
@@ -266,13 +356,18 @@ export function spokenPart(text: string, maxWords = SPOKEN_FIRST_SENTENCE_MAX_WO
  * /voice/say never pay twice).
  */
 export async function speak(text: string): Promise<Buffer> {
+  return (await speakInfo(text)).wav;
+}
+
+/** speak() plus which provider answered, how long it took and what failed before it. */
+export async function speakInfo(text: string): Promise<TtsResult> {
   const t = text.trim().slice(0, 600);
   if (!t) throw new Error("empty text");
   // A fixed line that's also a clip (e.g. the countdown lead): serve the cached clip.
   const clipKey = CLIP_BY_TEXT.get(t);
   if (clipKey) {
     const wav = await getClip(clipKey).catch(() => null);
-    if (wav) return wav;
+    if (wav) return { wav, provider: "clip", ms: 0, after: null };
   }
   const hit = sayCache.get(t);
   if (hit) return hit;
@@ -280,10 +375,12 @@ export async function speak(text: string): Promise<Buffer> {
   if (pending) return pending;
   const p = (async () => {
     try {
-      const wav = trimSilence(await getSaySynth()(t));
-      sayCache.set(t, wav);
+      const res = await runChain(saySteps(), t);
+      const out = { ...res, wav: trimSilence(res.wav) };
+      if (res.after) console.log(`[voice] tts: ${res.after} -> ${res.provider} ${(res.ms / 1000).toFixed(1)} s`);
+      sayCache.set(t, out);
       if (sayCache.size > 50) sayCache.delete(sayCache.keys().next().value!);
-      return wav;
+      return out;
     } finally {
       sayInFlight.delete(t);
     }
@@ -292,10 +389,11 @@ export async function speak(text: string): Promise<Buffer> {
   return p;
 }
 
-function wavResponse(wav: Buffer, cache: boolean): Response {
+function wavResponse(wav: Buffer, cache: boolean, extra: Record<string, string> = {}): Response {
   return new Response(new Uint8Array(wav), {
     headers: {
-      "content-type": "audio/wav",
+      ...extra,
+      "content-type": isMp3(wav) ? "audio/mpeg" : "audio/wav",
       "content-length": String(wav.length),
       // no-cache: clips can be regenerated (new text/voice), so the browser always revalidates.
       "cache-control": cache ? "no-cache" : "no-store",
@@ -329,7 +427,7 @@ export function registerVoiceRoutes(app: Hono<any, any, any>): void {
     try {
       const wav = await getClip(key);
       if (!wav) return c.json({ error: `unknown clip '${key}'` }, 404);
-      if (!isWav(wav)) return c.json({ error: "bad clip" }, 500);
+      if (!isWav(wav) && !isMp3(wav)) return c.json({ error: "bad clip" }, 500);
       return wavResponse(wav, true);
     } catch (e) {
       return c.json({ error: `clip unavailable: ${(e as Error).message?.slice(0, 120)}` }, 503);
@@ -346,7 +444,10 @@ export function registerVoiceRoutes(app: Hono<any, any, any>): void {
     }
     if (!text.trim()) return c.json({ error: "body must be {text}" }, 400);
     try {
-      return wavResponse(await speak(text), false);
+      const r = await speakInfo(text);
+      // Which provider spoke (the dashboard reports it per set): "elevenlabs; ms=1200; after=gemini timeout".
+      const info = `${r.provider}; ms=${r.ms}${r.after ? `; after=${r.after}` : ""}`;
+      return wavResponse(r.wav, false, { "x-lw-tts": info, "access-control-expose-headers": "x-lw-tts" });
     } catch (e) {
       return c.json({ error: `tts failed: ${(e as Error).message?.slice(0, 120)}` }, 503);
     }
@@ -362,4 +463,7 @@ export function _resetVoiceForTests(): void {
   state.failed = [];
   state.cacheDir = DEFAULT_VOICE_CACHE;
   sayCache.clear();
+  sayInFlight.clear();
+  state.eleven = undefined;
+  state.saySynth = undefined;
 }

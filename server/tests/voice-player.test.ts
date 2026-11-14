@@ -24,7 +24,7 @@ interface Player {
 }
 
 /** Loads voice-player.js with mocks. `sayDelayMs` = how long /voice/say takes. */
-function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {}) {
+function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number; sayHeader?: string } = {}) {
   const log: string[] = [];
   const spoken: { text: string; voice?: string; rate?: number }[] = [];
   const sayBodies: string[] = [];
@@ -69,7 +69,7 @@ function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {
       if (url === "/voice/say") {
         sayBodies.push(JSON.parse(init?.body ?? "{}").text);
         await sleep(o.sayDelayMs ?? 10);
-        return { ok: true, arrayBuffer: async () => ({ say: true }) };
+        return { ok: true, headers: { get: (n: string) => (n === "x-lw-tts" ? o.sayHeader ?? null : null) }, arrayBuffer: async () => ({ say: true }) };
       }
       return { ok: false, status: 404 };
     },
@@ -387,4 +387,14 @@ test("backup with only rep-number clips cached is not a sentence -> browser voic
   await A.coachAudio("r1", { ok: false });
   await sleep(500);
   assert.deepEqual(log, ["browser:" + LINE]);
+});
+
+
+test("server fell back to ElevenLabs (x-lw-tts) -> the set's tier is logged as elevenlabs after gemini timeout", async () => {
+  const { A, log, voiceLog } = load({ sayDelayMs: 1, sayHeader: "elevenlabs; ms=1200; after=gemini timeout" });
+  A.coachText("e1", FULL, { clips: CLIPS_R82 });
+  await A.coachAudio("e1", { ok: true, text: FULL, spoken: LINE });
+  await sleep(300);
+  assert.deepEqual(log, ["play:gemini-say"]); // the server's audio (ElevenLabs-made), one voice
+  assert.deepEqual(voiceLog[0], { set_id: "e1", tier: "elevenlabs", ms: 1200, reason: "gemini timeout" });
 });
