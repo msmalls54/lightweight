@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.mcp-use/
+*.log
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# local data
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# arduino build output
+firmware/**/build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
