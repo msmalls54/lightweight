@@ -181,7 +181,9 @@ export class Pipeline {
     let ctx: ReturnType<typeof buildCoachContext>;
     try {
       const todaySets = sess.kind === "live" && !sess.isWalkUp ? this.store.todaySetEnds(sess.person) : sess.sets;
-      ctx = buildCoachContext({ person: sess.person, todaySets });
+      // setMeta lets the coach compare like with like against history (same exercise/variant/load).
+      const setMeta = { ...this.store.todaySetMeta(sess.person), ...this.store.sessionSetMeta(sess.id) };
+      ctx = buildCoachContext({ person: sess.person, todaySets, setMeta });
     } catch (err) {
       console.error("[coach] context failed:", errMsg(err));
       this.hub.send({ type: "coach", set_id: e.set_id, text: null, fallback_clip: fallback });
@@ -366,6 +368,16 @@ export class Pipeline {
     this.pushStatus();
   }
 
+  // ------------------------------------------------------------------ quiet mode
+  /** Quiet mode: every dashboard plays no audio at all and the hands-free loop never auto-starts. */
+  quiet = false;
+  setQuiet(on: boolean) {
+    this.quiet = on;
+    this.hub.send({ type: "quiet", on });
+    this.pushStatus();
+    return { quiet: on };
+  }
+
   // ------------------------------------------------------------------ hands-free start
   countdown: { endsAt: number; timer: ReturnType<typeof setTimeout> } | null = null;
   /** Start set, hands-free: measure rest now (weights still down), count down, then arm. */
@@ -548,6 +560,7 @@ export class Pipeline {
       session: s ? { id: s.id, person: s.person, walkup: s.isWalkUp, kind: s.kind, arms: s.arms, calibrated: !!s.calibration, cal_source: s.calSource, mvc: s.calibration?.mvc ?? null, calibrating: s.calibrating, cal_problems: s.calibration?.problems ?? [], sets_done: s.sets.length } : null,
       set: s?.set ? { set_id: s.set.set_id, set_no: s.setNo, exercise: s.set.exercise, variant: s.set.variant, load_lb: s.set.load_lb ?? null, arms: s.set.arms } : null,
       armed: s?.armed ?? null,
+      quiet: this.quiet,
       countdown_ms_left: this.countdown ? Math.max(0, this.countdown.endsAt - now) : null,
       replay: this.replay ? { source: this.replay.source, i: this.replay.i, n: this.replay.n, speed: this.replay.speed } : null,
       dashboards: this.hub.size,
