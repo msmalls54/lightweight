@@ -106,6 +106,14 @@
   #feed .tag { font-size: clamp(15px, 2.1vh, 20px); font-weight: 800; color: var(--green); text-align: right; }
   #feed li.cheat .tag { color: var(--red); }
   #feed li.loose { border-left-color: var(--amber); }
+  #feed li.report { border-left-color: var(--blue); background: #132033; }
+  #feed li.report .tag.src { font-size: 12px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
+  #feed li.report .rep-body { grid-column: 1 / -1; font-size: clamp(14px, 1.9vh, 18px); }
+  #feed li.report .rep-head { font-weight: 800; font-size: clamp(16px, 2.2vh, 21px); margin: 2px 0 4px; }
+  #feed li.report ul { margin: 0 0 4px; padding-left: 20px; }
+  #feed li.report li { padding: 1px 0; background: none; border: 0; display: list-item; }
+  #feed li.report .rep-cue { color: var(--green); font-weight: 700; }
+  #feed li.report .rep-dec { color: var(--dim); }
   #feed .tag.loose { color: var(--amber); }
   #feed .d { grid-column: 1 / -1; color: var(--dim); font-size: clamp(13px, 1.7vh, 16px); }
   #feed li.fresh { animation: pop .5s ease-out; }

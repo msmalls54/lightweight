@@ -210,6 +210,18 @@
     }
   }
 
+  // "Set N report" card from the coach's detailed summary (headline, bullets, cue, engine decision).
+  function renderReport(e) {
+    const d = e.detail;
+    if (!d) return;
+    const dec = d.decision ? `${esc(d.decision.next.replace(/_/g, " "))}${d.decision.reason ? `: ${esc(d.decision.reason)}` : ""}` : "";
+    addFeed(`<span class="t">Set ${e.set_no ?? ""} report</span><span class="tag src">${esc(d.source || "")}</span>
+      <div class="rep-body"><div class="rep-head">${esc(d.headline || "")}</div>
+      <ul>${(d.bullets || []).map(b => `<li>${esc(b)}</li>`).join("")}</ul>
+      ${d.cue ? `<div class="rep-cue">Cue: ${esc(d.cue)}</div>` : ""}
+      ${dec ? `<div class="rep-dec">Decision: ${dec}</div>` : ""}</div>`, "report");
+  }
+
   function repHtml(r) {
     const armName = r.arm === "L" ? "Left" : "Right";
     const bi = r.arm === "L" ? 2 : 0, de = bi + 1;
@@ -424,7 +436,7 @@
     if (!$("handsFree").checked || !controller()) return;
     waitingSet = e.set_id;
     if (e.too_short) return scheduleNext();
-    waitTimer = setTimeout(scheduleNext, 20_000); // coach line never came: go on anyway
+    waitTimer = setTimeout(scheduleNext, 45_000); // coach audio never came: go on anyway
   }
   async function loopAfterCoach(setId) {
     if (waitingSet !== setId) return;
@@ -457,10 +469,17 @@
         case "countdown": onCountdown(e); break;
         case "coach":
           if (e.too_short) break;
-          if (e.text) { $("coach").textContent = e.text; say(e.text); }
-          else { $("coach").textContent = ""; playClip(e.fallback_clip); }
+          $("coach").textContent = e.text || "";
+          if (e.audio !== "pending") { // older servers: speak now
+            if (e.text) say(e.text); else playClip(e.fallback_clip);
+            loopAfterCoach(e.set_id);
+          }
+          break;
+        case "coach_audio": // the server finished the TTS for this set's line (once, cached)
+          if (e.ok && e.text) say(e.text); else playClip(e.fallback_clip);
           loopAfterCoach(e.set_id);
           break;
+        case "set_detail": renderReport(e); break;
         case "calibration": clearStale(); onCalEvent(e); break;
         case "calibrate_request": calibrate(); break;
         case "session":

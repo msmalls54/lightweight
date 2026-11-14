@@ -1,5 +1,5 @@
 // batch -> store -> engine.ingest -> events -> SSE (+ pickCue). Also sets, calibration and replay.
-import { Engine, pickCueSequence, pickSetEndCue, buildCoachContext, summarizeSet, writeTodayHistory, speak,
+import { Engine, pickCueSequence, pickSetEndCue, buildCoachContext, summarizeSet, summarizeSetDetail, writeTodayHistory, speak,
   type Arm, type Batch, type Calibration, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "./modules.js";
 import type { Store, SessionKind, EventRow } from "./store.js";
 import type { Hub } from "./hub.js";
@@ -170,21 +170,45 @@ export class Pipeline {
     this.hub.send({ type: "calibration", phase: "raised", before, ...cal });
   }
 
+  /**
+   * Set end (>= 3 reps): the spoken line and the detailed "Set N report" run in parallel. Text goes to the
+   * dashboards as soon as it exists; TTS (5-17 s) runs once on the server afterwards, then `coach_audio`
+   * tells the speaker tab to play it (its /voice/say hits the server's TTS cache).
+   */
   private async coach(sess: Sess, e: SetEndEvent) {
     const fallback = e.cheats ? "stop_and_rest" : "nice_set";
+    const setNo = sess.setNo ?? null;
+    let ctx: ReturnType<typeof buildCoachContext>;
     try {
       const todaySets = sess.kind === "live" && !sess.isWalkUp ? this.store.todaySetEnds(sess.person) : sess.sets;
-      const ctx = buildCoachContext({ person: sess.person, todaySets });
+      ctx = buildCoachContext({ person: sess.person, todaySets });
+    } catch (err) {
+      console.error("[coach] context failed:", errMsg(err));
+      this.hub.send({ type: "coach", set_id: e.set_id, text: null, fallback_clip: fallback });
+      this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
+      return;
+    }
+    const detail = withTimeout(summarizeSetDetail(ctx, e), 15_000)
+      .then(d => { this.hub.send({ type: "set_detail", set_id: e.set_id, set_no: setNo, detail: d }); })
+      .catch(err => console.error("[coach] summarizeSetDetail failed:", errMsg(err)));
+    try {
       const text = await withTimeout(summarizeSet(ctx, e), 12_000);
       this.store.saveCoachLine(e.set_id, text);
       console.log(`[coach] ${sess.person} set ${e.set_id}: ${text}`);
-      // Generate the speech ONCE here; the speaker dashboard's /voice/say then hits the server's TTS cache.
-      try { await withTimeout(speak(text), 10_000); } catch (err) { console.error("[voice] summary TTS failed:", errMsg(err)); }
-      this.hub.send({ type: "coach", set_id: e.set_id, text, fallback_clip: fallback });
+      this.hub.send({ type: "coach", set_id: e.set_id, text, fallback_clip: fallback, audio: "pending" });
+      try {
+        await withTimeout(speak(text), 30_000);
+        this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: true, text });
+      } catch (err) {
+        console.error("[voice] summary TTS failed:", errMsg(err));
+        this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
+      }
     } catch (err) {
       console.error("[coach] summarizeSet failed:", errMsg(err));
       this.hub.send({ type: "coach", set_id: e.set_id, text: null, fallback_clip: fallback });
+      this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
     }
+    await detail;
   }
 
   // ------------------------------------------------------------------ sessions + sets
