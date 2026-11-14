@@ -59,7 +59,7 @@ export interface EngineConfig extends RepThresholds {
   earlyCheatBeforeRep: number;
   /** plan.rules.fatigue_signal: "...in two sets in a row". Set to 1 to fire on the first such set. */
   earlyCheatSetsInRow: number;
-  /** plan.rules.max_cheat_reps_per_set (mentioned in the reason text). */
+  /** plan.rules.max_cheat_reps_per_set: more cheat reps than this → stop_at_first_cheat_rest_longer. */
   maxCheatRepsPerSet: number;
   /** slow_the_tempo when more than this fraction of reps have a very fast up phase. */
   fastUpFraction: number;

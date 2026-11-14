@@ -26,3 +26,5 @@ Thumbs.db
 .vscode/
 .idea/
 firmware/**/arduino_secrets.h
+*.sqlite-wal
+*.sqlite-shm

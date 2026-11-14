@@ -89,9 +89,9 @@ test("fatigue drift: clean through rep 5, delt takes over from rep 6", () => {
   // delt_share trends up after rep 5
   const shares = end.reps.map((r) => r.delt_share);
   for (let i = 6; i < shares.length; i++) assert.ok(shares[i] >= shares[i - 1] - 0.01);
-  // late cheat (rep 6, not before it): no early-stop rule
-  assert.equal(end.decision.next, "continue");
-  assert.match(end.decision.reason, /first at rep 6/);
+  // 5 cheat reps > plan's max of 1 per set
+  assert.equal(end.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.match(end.decision.reason, /5 cheat reps \(first at rep 6\); the plan allows 1 cheat rep\./);
 });
 
 test("delt peak alone flags a rep", () => {
@@ -105,15 +105,20 @@ test("delt peak alone flags a rep", () => {
   assert.equal(last.cheat_reason, "delt_peak");
 });
 
+// One cheat at rep 3 (within the plan's 1-per-set allowance, but before rep 6).
+const EARLY_ONE: SynthRep[] = [...presets.clean(2), ...presets.swing(1), ...presets.clean(3)];
+
 test("early cheats two sets in a row -> stop at first cheat, rest longer (never a load change)", () => {
   const e = calibrated();
-  const early: SynthRep[] = [...presets.clean(2), ...presets.swing(3)];
+  const early = EARLY_ONE;
   const a = runSet(e, early, { set_id: "a" }).end;
   assert.equal(a.first_cheat_rep, 3);
+  assert.equal(a.cheats, 1);
   assert.equal(a.decision.next, "continue"); // first time: warning only (plan: "two sets in a row")
   assert.match(a.decision.reason, /next set/);
   const b = runSet(e, early, { set_id: "b" }).end;
   assert.equal(b.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.match(b.decision.reason, /before rep 6 in 2 sets in a row/);
   for (const d of [a.decision, b.decision]) assert.doesNotMatch(d.reason, /(add|drop|increase|decrease|lower|heavier|lighter)/i);
 
   // earlyCheatSetsInRow = 1 fires on the first such set
@@ -123,10 +128,65 @@ test("early cheats two sets in a row -> stop at first cheat, rest longer (never 
 
 test("a clean set resets the early-cheat streak", () => {
   const e = calibrated();
-  const early: SynthRep[] = [...presets.clean(2), ...presets.swing(3)];
+  const early = EARLY_ONE;
   runSet(e, early, { set_id: "a" });
   runSet(e, presets.clean(5), { set_id: "b" });
   assert.equal(runSet(e, early, { set_id: "c" }).end.decision.next, "continue");
+});
+
+const NO_LOAD_TALK = /(add|drop|increase|decrease|lower|heavier|lighter|weight up|weight down)/i;
+
+test("more cheat reps than the plan allows -> stop at first cheat, rest longer", () => {
+  // 2 late cheats (reps 7, 8): no early-cheat streak, but over the 1-per-set limit
+  const reps: SynthRep[] = [...presets.clean(6), ...presets.swing(2)];
+  const { end } = runSet(calibrated(), reps);
+  assert.equal(end.cheats, 2);
+  assert.equal(end.first_cheat_rep, 7);
+  assert.equal(end.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.equal(
+    end.decision.reason,
+    "2 cheat reps (first at rep 7); the plan allows 1 cheat rep. Next set, stop at the first cheat and rest longer. Same weight.",
+  );
+  assert.doesNotMatch(end.decision.reason, NO_LOAD_TALK);
+});
+
+test("exactly the allowed number of late cheats -> continue", () => {
+  const reps: SynthRep[] = [...presets.clean(6), ...presets.swing(1)];
+  const { end } = runSet(calibrated(), reps);
+  assert.equal(end.cheats, 1);
+  assert.equal(end.decision.next, "continue");
+  assert.match(end.decision.reason, /6 clean, 1 cheat \(first at rep 7\)/);
+});
+
+test("maxCheatRepsPerSet comes from config", () => {
+  const reps: SynthRep[] = [...presets.clean(6), ...presets.swing(2)];
+  const { end } = runSet(calibrated({ maxCheatRepsPerSet: 2 }), reps);
+  assert.equal(end.decision.next, "continue");
+  const swing3 = runSet(calibrated({ maxCheatRepsPerSet: 2 }), [...presets.clean(6), ...presets.swing(3)]).end;
+  assert.equal(swing3.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.match(swing3.decision.reason, /the plan allows 2 cheat reps\./);
+});
+
+test("max-cheats rule beats the tempo rule", () => {
+  // all reps very fast, and 2 of them swing
+  const fast = presets.fast(6);
+  const reps: SynthRep[] = [...fast.slice(0, 4), ...fast.slice(4).map((r) => ({ ...r, bi: 0.55, delt: 0.6 }))];
+  const { end } = runSet(calibrated(), reps);
+  assert.equal(end.cheats, 2);
+  assert.ok(end.reps.filter((r) => r.up_ms < DEFAULT_CONFIG.fastUpMs).length > 3);
+  assert.equal(end.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.match(end.decision.reason, /2 cheat reps/);
+});
+
+test("max-cheats rule beats the early-cheat streak, and the streak still counts", () => {
+  const e = calibrated();
+  const a = runSet(e, [...presets.clean(2), ...presets.swing(3)], { set_id: "a" }).end; // 3 early cheats
+  assert.equal(a.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.match(a.decision.reason, /^3 cheat reps \(first at rep 3\); the plan allows 1 cheat rep\./);
+  // next set has only 1 early cheat: the 2-in-a-row streak fires
+  const b = runSet(e, EARLY_ONE, { set_id: "b" }).end;
+  assert.equal(b.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.match(b.decision.reason, /2 sets in a row/);
 });
 
 test("very fast up phase on most reps -> slow_the_tempo", () => {
