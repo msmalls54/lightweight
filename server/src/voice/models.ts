@@ -11,6 +11,16 @@ export const BRAIN_THINKING_LEVEL = "LOW";
 /** Voice: low-latency TTS first, higher fidelity as fallback. */
 export const TTS_MODEL = "gemini-3.8-flash-lite-tts";
 export const TTS_FALLBACK_MODELS = ["gemini-3.8-flash-tts"];
+/**
+ * Live TTS for summaries/answers (speak, /voice/say). Measured Nov 14 ~1:45 pm: flash-tts median 3.3 s
+ * (2.5–4.3 s, 6/6 ok) while flash-lite-tts timed out at 20 s 6/6, so summaries try flash first.
+ * Clips keep TTS_MODEL (they're cached anyway).
+ */
+export const SAY_TTS_MODELS = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"];
+/** Per-model timeout for live TTS: fail over fast (the browser voice takes over at 5 s anyway). */
+export const SAY_TTS_TIMEOUT_MS = 8000;
+/** Spoken part of a summary: Gemini TTS reads only the first sentence, at most this many words. */
+export const SPOKEN_FIRST_SENTENCE_MAX_WORDS = 15;
 /** TTS only works through `ai.interactions.create` on v1beta (generateContent rejects speechConfig). */
 export const TTS_API_VERSION = "v1beta";
 

@@ -136,7 +136,7 @@ test("all-clean set: plain words and a technique cue, no numbers", async () => {
 test("first reps before any clean reference: 'learning your clean rep'", () => {
   const learning: SetEndEvent = { ...CLEAN3, reps: CLEAN3.reps.slice(0, 2) };
   assert.equal(setFacts(learning).reference_status, "learning");
-  assert.equal(fallbackSummary(learning), "2 reps in. Still learning your clean rep, so no calls yet. Keep them strict.");
+  assert.equal(fallbackSummary(learning), "Still learning your clean rep, so no calls yet. 2 reps in, keep them strict.");
   const d = fallbackDetail(learning);
   assert.equal(d.headline, "2 reps in, learning your clean rep");
   assert.match(d.bullets[0], /^Learning your clean rep/);

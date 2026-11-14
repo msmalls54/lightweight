@@ -58,3 +58,19 @@ test("'faster than your usual': up under 0.75 x the set median, separate from ru
   const noRush: SetEndEvent = { ...set, reps: set.reps.filter((r) => r.rep !== 5) };
   assert.match(fallbackDetail(noRush).bullets.join(" "), /nothing rushed, but rep 4 came up faster than your usual/);
 });
+
+test("the spoken first sentence of every code line carries the point in <= 15 words", async () => {
+  const { spokenPart } = await import("../src/voice/index.js");
+  const learning = { ...CLEAN3, reps: CLEAN3.reps.slice(0, 2) };
+  const expected: [SetEndEvent, RegExp][] = [
+    [SET1, /^Reps 4 and 8: right shoulder at 9 and 7 times normal, that's a swing\.$/],
+    [SET2, /^From rep 6 on, your right shoulder took over, 8 to 12 times normal\.$/],
+    [CLEAN3, /^All 3 reps clean, shoulder in its normal range\.$/],
+    [learning, /^Still learning your clean rep, so no calls yet\.$/],
+  ];
+  for (const [s, re] of expected) {
+    const first = spokenPart(fallbackSummary(s));
+    assert.match(first, re);
+    assert.ok(words(first) <= 15, first);
+  }
+});
