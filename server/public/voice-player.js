@@ -59,6 +59,21 @@
       window.dispatchEvent(new CustomEvent("lwaudio", { detail: { type: type, what: what } }));
     } catch (e) {}
   }
+  // Watchdog: a promise that settles by itself after ms (never let one job hold the voice lock forever).
+  function within(p, ms, onTimeout) {
+    var t;
+    return Promise.race([
+      p,
+      new Promise(function (resolve) {
+        t = setTimeout(function () {
+          resolve(onTimeout ? onTimeout() : false);
+        }, ms);
+      }),
+    ]).then(function (v) {
+      clearTimeout(t);
+      return v;
+    });
+  }
 
   // Ramp music.volume with timers (not Web Audio), so music never goes silent if the
   // AudioContext is suspended.
@@ -91,10 +106,22 @@
     });
   }
 
+  // fetch with a time limit: a request hanging on the server (TTS down) must never hold one of the
+  // browser's 6 connections per host, or other tabs can't even load and every POST lags behind it.
+  function fetchT(url, opts, ms) {
+    var ac = window.AbortController ? new AbortController() : null;
+    var t = ac ? setTimeout(function () { ac.abort(); }, ms) : null;
+    var o = Object.assign({}, opts || {});
+    if (ac) o.signal = ac.signal;
+    return fetch(url, o).finally(function () {
+      clearTimeout(t);
+    });
+  }
+
   function loadClip(key) {
     if (buffers[key]) return Promise.resolve(buffers[key]);
     if (!loading[key]) {
-      loading[key] = fetch("/voice/clip/" + encodeURIComponent(key) + ".wav")
+      loading[key] = fetchT("/voice/clip/" + encodeURIComponent(key) + ".wav", null, 6000)
         .then(function (r) {
           if (!r.ok) throw new Error("clip " + key + " " + r.status);
           return r.arrayBuffer();
@@ -113,16 +140,24 @@
   }
 
   function playBuffer(buf) {
-    return new Promise(function (resolve) {
-      var c = audioCtx();
-      var src = c.createBufferSource();
-      src.buffer = buf;
-      src.connect(c.destination);
-      src.onended = function () {
-        resolve();
-      };
-      src.start();
-    });
+    // onended never fires while the AudioContext is suspended: give up after the clip's length + 3 s.
+    return within(
+      new Promise(function (resolve) {
+        var c = audioCtx();
+        var src = c.createBufferSource();
+        src.buffer = buf;
+        src.connect(c.destination);
+        src.onended = function () {
+          resolve(true);
+        };
+        src.start();
+      }),
+      (buf.duration || 2) * 1000 + 3000,
+      function () {
+        emit("watchdog", "clip:" + (ctx ? ctx.state : "no-ctx"));
+        return false;
+      },
+    );
   }
 
   // Duck, run `play()` (a promise), restore. Caller holds `busy`.
@@ -141,8 +176,13 @@
 
   function voice(bufs, what) {
     var c = audioCtx();
-    var resume = c && c.state === "suspended" ? c.resume() : Promise.resolve();
+    // resume() stays pending until a user gesture: don't wait on it forever, report it.
+    var resume = c && c.state === "suspended" ? within(c.resume(), 1500) : Promise.resolve();
     return resume.then(function () {
+      if (c && c.state === "suspended") {
+        emit("drop", what + ":ctx-suspended");
+        return false;
+      }
       return withDuck(function () {
         return bufs.reduce(function (p, b) {
           return p.then(function () {
@@ -255,12 +295,20 @@
       busy = true;
       lastStart = Date.now();
       cancelBrowserSpeech();
-      return Promise.resolve()
-        .then(job)
-        .catch(function (e) {
-          console.warn("[LWAudio] " + what + " failed", e);
+      // Hard cap per job (a coach line may wait up to ~25 s for TTS): the lock always comes back.
+      return within(
+        Promise.resolve()
+          .then(job)
+          .catch(function (e) {
+            console.warn("[LWAudio] " + what + " failed", e);
+            return false;
+          }),
+        LWAudio.jobCapMs,
+        function () {
+          emit("watchdog", what);
           return false;
-        });
+        },
+      );
     });
     chain = run.then(
       function () {
@@ -286,11 +334,11 @@
   }
 
   function fetchSay(text) {
-    return fetch("/voice/say", {
+    return fetchT("/voice/say", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: text }),
-    })
+    }, 24000) // under say()'s 25 s cap; above the server TTS chain (~16 s) so its backup voice gets through
       .then(function (r) {
         if (!r.ok) throw new Error("say " + r.status);
         return r.arrayBuffer();
@@ -382,6 +430,12 @@
 
   var LWAudio = {
     cooldownMs: 3000,
+    // Hard cap per queue job: above say()'s 25 s TTS wait + playback, so only a truly stuck job trips it.
+    jobCapMs: 40000,
+    /** Diagnostics for the dashboard (③): what could keep this tab silent. */
+    state: function () {
+      return { ctx: ctx ? ctx.state : "none", enabled: enabled, busy: busy, pending: pending, sink: sinkId, since: busy ? Date.now() - lastStart : 0 };
+    },
     fallbackMs: 25000, // say(): safety cap on /voice/say (the server's TTS chain gives up after ~16 s)
     coachSafetyMs: 45000, // coach line: backup only if no coach_audio arrives at all by then
     cachedAudioMs: 8000, // coach_audio said "cached": cap on fetching it
@@ -423,11 +477,14 @@
           return r.json();
         })
         .then(function (j) {
-          return Promise.all(
-            (j.keys || []).map(function (k) {
-              return loadClip(k).catch(function () {});
-            }),
-          );
+          // Two at a time, so preloading never takes more than 2 of the browser's connections.
+          var keys = (j.keys || []).slice();
+          function worker() {
+            var k = keys.shift();
+            if (!k) return Promise.resolve();
+            return loadClip(k).catch(function () {}).then(worker);
+          }
+          return Promise.all([worker(), worker()]);
         })
         .catch(function () {});
       return LWAudio.ready;
@@ -441,7 +498,7 @@
       // Set-end feedback (first key "set_done") waits its turn; the set's summary queues after it.
       // Other call-outs are dropped while anything is queued or inside the cooldown.
       if (keys[0] !== "set_done" && (pending > 0 || Date.now() - lastStart < LWAudio.cooldownMs)) {
-        emit("drop", what);
+        emit("drop", what + (pending > 0 ? ":busy pending=" + pending : ":cooldown"));
         return Promise.resolve(false);
       }
       // A missing clip (e.g. TTS was down when it should have been generated) is skipped, not fatal:
@@ -560,7 +617,7 @@
       var what = (opts && opts.what) || "element";
       if (!el) return Promise.resolve(false);
       if (!enabled || (opts && opts.dropIfBusy && pending > 0)) {
-        emit("drop", what);
+        emit("drop", what + (!enabled ? ":disabled" : ":busy pending=" + pending));
         return Promise.resolve(false);
       }
       return enqueue(function () {

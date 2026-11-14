@@ -162,7 +162,7 @@ test("call-outs inside the cooldown are dropped; set-end sequences wait instead"
   await first;
   assert.equal(await end, true);
   assert.deepEqual(log, ["play:rep_1", "play:set_done", "play:two_cheats"]);
-  assert.ok(events.includes("drop:nice_set"));
+  assert.ok(events.includes("drop:nice_set:busy pending=1"));
 });
 
 test("say(): Gemini audio in time -> plays it, no browser voice", async () => {

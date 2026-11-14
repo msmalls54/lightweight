@@ -51,6 +51,14 @@ export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store
   app.get("/muscle-map.json", c => sendFile(c, resolve(REPO_ROOT, "assets/muscle-map/anterior.json")));
 
   app.get("/events", c => hub.connect(c.req.raw.signal, pipeline.snapshot(), { mute: c.req.query("mute") !== undefined, visible: c.req.query("visible") !== "0" }));
+  // Client audio diagnostics (loopback only, small body): one compact log line per event.
+  app.post("/debug/audio", async c => {
+    const b = (await c.req.json().catch(() => ({}))) as { client_id?: unknown; evt?: unknown; what?: unknown; state?: Record<string, unknown> };
+    const st = b.state && typeof b.state === "object" ? b.state : {};
+    const f = (k: string) => (st[k] === undefined ? "" : ` ${k}=${String(st[k]).slice(0, 40)}`);
+    console.log(`[audio] ${String(b.client_id ?? "?").slice(0, 8)} ${String(b.evt ?? "").slice(0, 24)}${b.what ? ` ${String(b.what).slice(0, 80)}` : ""} |${f("speaker")}${f("ctx")}${f("enabled")}${f("pending")}${f("busy_ms")}${f("sink")}${f("quiet")}${f("muted")}${f("stale")}${f("unlocked")} spk=${hub.speaker ?? "-"}`);
+    return c.json({ ok: true });
+  });
   app.post("/speaker/visibility", wrap(async c => {
     const b = (await c.req.json().catch(() => ({}))) as { client_id?: unknown; visible?: unknown };
     if (typeof b.client_id !== "string" || typeof b.visible !== "boolean" || !hub.setVisible(b.client_id, b.visible)) throw new HttpError(400, "Unknown dashboard.");
