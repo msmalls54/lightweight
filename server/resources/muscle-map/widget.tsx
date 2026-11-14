@@ -30,7 +30,7 @@ function groupReps(reps: RepView[]) {
   for (const r of reps) {
     const g = m.get(r.rep) ?? { rep: r.rep, cheat: false, peak: [0, 0, 0, 0], events: [] };
     g.cheat ||= r.cheat;
-    g.peak = g.peak.map((v, i) => Math.max(v, r.peak_pct[i] ?? 0));
+    g.peak = g.peak.map((v, i) => Math.max(v, r.raw_effort.peak_pct[i] ?? 0));
     g.events.push(r);
     m.set(r.rep, g);
   }
@@ -86,7 +86,7 @@ function MuscleMap({ p, dark }: { p: Props; dark: boolean }) {
       <Body values={values} dark={dark} arms={arms} />
       <div style={{ flex: 1, minWidth: 260 }}>
         <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>{tab("rep", "Rep")}{tab("set", "Set")}{tab("session", "Session")}</div>
-        <div style={{ fontSize: 12, color: dim, marginBottom: 6 }}>Peak %MVC · {view === "rep" && sel ? `rep ${sel.rep}` : view === "set" ? `avg per rep, set ${s.set_no}` : "avg per rep, whole session"}</div>
+        <div style={{ fontSize: 12, color: dim, marginBottom: 6 }}>Raw effort, peak %MVC (context only) · {view === "rep" && sel ? `rep ${sel.rep}` : view === "set" ? `avg per rep, set ${s.set_no}` : "avg per rep, whole session"}</div>
         {CH_LABEL.map((l, i) => {
           const used = arms.includes(i < 2 ? "R" : "L");
           const v = values[i] ?? 0;
@@ -109,8 +109,8 @@ function MuscleMap({ p, dark }: { p: Props; dark: boolean }) {
           onChange={e => { setIdx(Number(e.target.value)); setView("rep"); }} style={{ width: "100%", marginTop: 8 }} aria-label="Rep scrubber" />}
         {sel && view === "rep" && <div style={{ marginTop: 8, fontSize: 14 }}>
           {sel.events.map(e => <div key={e.arm}>
-            <b>Rep {e.rep}{arms.length > 1 ? ` ${e.arm === "R" ? "right" : "left"}` : ""}</b>: delt share {pct(e.delt_share)}{e.baseline_delt_share !== null ? ` (baseline ${pct(e.baseline_delt_share)})` : ""}
-            {e.cheat ? <b style={{ color: red }}> · {e.reason}</b> : <span style={{ color: green }}> · clean</span>}
+            <b>Rep {e.rep}{arms.length > 1 ? ` ${e.arm === "R" ? "right" : "left"}` : ""}</b>: {e.shoulder_help_x !== null ? `${e.shoulder_help_x}× shoulder help vs your clean reps` : "learning your clean rep"}
+            {e.cheat ? <b style={{ color: red }}> · cheat: {e.reason}</b> : e.verdict === "loose" ? <span style={{ color: "#d97706" }}> · loose</span> : <span style={{ color: green }}> · clean</span>}
           </div>)}
         </div>}
         {s.coach_line && <div style={{ marginTop: 12, padding: "8px 12px", borderLeft: `3px solid #3d8bfd`, background: dark ? "#1c212c" : "#f0ece6", fontSize: 14 }}>{s.coach_line}</div>}
@@ -119,7 +119,7 @@ function MuscleMap({ p, dark }: { p: Props; dark: boolean }) {
 
     {ac && <div style={{ marginTop: 14, borderTop: `1px solid ${line}`, paddingTop: 12 }}>
       <div style={{ fontSize: 13, color: dim, fontWeight: 600, marginBottom: 6 }}>
-        Biceps balance (right share) {ac.overall_r_share !== null ? `· overall ${pct(ac.overall_r_share)} R / ${pct(1 - ac.overall_r_share)} L · weaker: ${ac.weaker_arm}` : "· no two-arm sets"}
+        Biceps balance, reps where both arms curled {ac.overall_r_share !== null ? `· ${pct(ac.overall_r_share)} R / ${pct(1 - ac.overall_r_share)} L · ${ac.overall_verdict}` : `· ${ac.overall_verdict ?? "one arm only: no balance"}`}
       </div>
       {ac.sets.map(r => <div key={r.set_no} style={{ display: "grid", gridTemplateColumns: "60px 1fr 90px", gap: 8, alignItems: "center", marginBottom: 6, fontSize: 14 }}>
         <span>Set {r.set_no}</span>
@@ -130,7 +130,7 @@ function MuscleMap({ p, dark }: { p: Props; dark: boolean }) {
         <span style={{ textAlign: "right", fontWeight: 700 }}>{r.r_share === null ? "n/a" : `${pct(r.r_share)} R`}{r.flagged ? " ⚠" : ""}</span>
       </div>)}
     </div>}
-    <div style={{ marginTop: 10, fontSize: 11, color: dim }}>Relative activation (%MVC from this session's calibration). Gray muscles are not measured. Not force, not medical.</div>
+    <div style={{ marginTop: 10, fontSize: 11, color: dim }}>Cheat call = shoulder help on the way up vs your clean reps. Raw effort is relative (%MVC); front delt at about half the biceps is normal under load. Gray muscles are not measured. Not force, not medical.</div>
   </div>;
 }
 

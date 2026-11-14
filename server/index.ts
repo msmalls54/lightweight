@@ -42,7 +42,8 @@ if (!process.env.LW_MCP_TOKEN) {
   try { appendFileSync(envFile, `\nLW_MCP_TOKEN=${token}\n`, { mode: 0o600 }); } catch { /* read-only: token for this run only */ }
   process.env.LW_MCP_TOKEN = token;
 }
-const stateUrlFile = resolve(SERVER_DIR, ".mcp-use", "state", "public-url.txt");
+// server/.cache survives restarts (mcp-use dev wipes .mcp-use/state on start); gitignored.
+const stateUrlFile = resolve(SERVER_DIR, ".cache", "public-url.txt");
 const publicUrl = (process.env.LW_PUBLIC_URL || (existsSync(stateUrlFile) ? readFileSync(stateUrlFile, "utf8").trim() : "")).replace(/\/$/, "") || undefined;
 const publicOrigin = publicUrl ? new URL(publicUrl).origin : null;
 
