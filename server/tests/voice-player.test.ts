@@ -17,6 +17,9 @@ interface Player {
   cooldownMs: number;
   ready: Promise<unknown>;
   isSpeaking(): boolean;
+  playElement(el: unknown, opts?: { what?: string; dropIfBusy?: boolean }): Promise<boolean>;
+  setEnabled(on: boolean): void;
+  setSinkId(id: string): Promise<unknown>;
 }
 
 /** Loads voice-player.js with mocks. `sayDelayMs` = how long /voice/say takes. */
@@ -117,7 +120,21 @@ function load(o: { sayDelayMs?: number; clipMs?: number; speechMs?: number } = {
   vm.runInContext(SRC, sandbox);
   const A = sandbox.LWAudio as Player;
   A.setMusic(music);
-  return { A, log, spoken, events, music, minVol, sayBodies, live };
+  /** A fake <audio> element that "plays" for ms and logs while audible. */
+  const element = (name: string, ms = 30) => {
+    const el: { duration: number; currentTime: number; onended?: () => void; onerror?: () => void; play(): Promise<void> } = {
+      duration: ms / 1000,
+      currentTime: 0,
+      play() {
+        log.push("element:" + name);
+        on();
+        setTimeout(() => (off(), el.onended?.()), ms);
+        return Promise.resolve();
+      },
+    };
+    return el;
+  };
+  return { A, log, spoken, events, music, minVol, sayBodies, live, element };
 }
 
 test("playClip ducks music to 20% and restores it", async () => {
@@ -274,4 +291,43 @@ test("anything that arrives while a voice plays waits; stray browser speech is c
   await p1;
   assert.deepEqual(log, ["browser:Every rep clean.", "play:gemini-say"]);
   assert.equal(live.max, 1);
+});
+
+
+test("playElement (countdown / lead-in) goes through the same queue: never over another voice", async () => {
+  const { A, log, live, element, minVol } = load({ clipMs: 120 });
+  await A.ready;
+  const clips = A.playClip(["set_done", "two_cheats"]);
+  assert.equal(await A.playElement(element("countdown"), { what: "countdown", dropIfBusy: true }), false); // busy: dropped
+  const lead = A.playElement(element("lead_in", 40), { what: "lead_in" }); // waits its turn
+  await clips;
+  assert.equal(await lead, true);
+  assert.deepEqual(log, ["play:set_done", "play:two_cheats", "element:lead_in"]);
+  assert.equal(live.max, 1);
+  assert.ok(minVol.v < 0.17); // ducked like any voice
+});
+
+test("setEnabled(false) (not the speaker tab / stale build): nothing speaks", async () => {
+  const { A, log, spoken, element } = load();
+  await A.ready;
+  A.setEnabled(false);
+  assert.equal(await A.say("Same weight, keep going."), false);
+  assert.equal(await A.playClip("rep_1"), false);
+  assert.equal(await A.playElement(element("countdown")), false);
+  A.fallbackMs = 10;
+  A.coachText("off", "Every rep clean.");
+  await sleep(100);
+  assert.deepEqual(log, []);
+  assert.equal(spoken.length, 0);
+  A.setEnabled(true);
+  assert.equal(await A.playClip("rep_1"), true);
+});
+
+test("a chosen output device: the browser voice can't be routed there, so text only (no wrong-speaker voice)", async () => {
+  const { A, log, events } = load({ sayDelayMs: 300 });
+  await A.setSinkId("bt-speaker-id");
+  assert.equal(await A.say("Rep five smaller.", { fallbackMs: 20 }), false);
+  await sleep(400);
+  assert.deepEqual(log, []);
+  assert.ok(events.includes("no_route:browser:say"));
 });

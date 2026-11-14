@@ -22,7 +22,9 @@
   // Quiet mode: no audio at all on any dashboard (server-wide flag, also kept in localStorage).
   let QUIET = false;
   try { QUIET = localStorage.getItem("lw.quiet") === "1"; } catch { /* storage blocked */ }
-  const silent = () => MUTED || QUIET || !isSpeaker;
+  let STALE = false; // ④: this tab's JS is older than the server's -> never speak (see checkBuild)
+  const silent = () => MUTED || QUIET || !isSpeaker || STALE;
+  const syncVoice = () => { try { window.LWAudio?.setEnabled?.(!silent()); } catch { /* ignore */ } };
   function speakFallback(text) {
     if (silent() || !("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
@@ -364,6 +366,27 @@
   loadWorkoutSummary();
   setInterval(loadWorkout, 15000);
 
+  // ④ stale-tab guard: if the dashboard JS on the server changes after this tab loaded, this tab goes
+  // silent (text only) and asks to be reloaded, so an old tab can never talk over the speaker tab.
+  let BUILD0 = null;
+  async function checkBuild() {
+    try {
+      const j = await (await fetch("/voice/build", { cache: "no-store" })).json();
+      if (!BUILD0) BUILD0 = j.build;
+      else if (j.build && j.build !== BUILD0 && !STALE) {
+        STALE = true;
+        syncVoice();
+        const d = document.createElement("div");
+        d.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:8px 12px;text-align:center;font:600 14px system-ui,sans-serif";
+        d.innerHTML = 'This tab is out of date, so its voice is off. <button style="margin-left:8px;font:inherit;padding:2px 10px;cursor:pointer">Reload this tab</button>';
+        d.querySelector("button").onclick = () => location.reload();
+        document.body.appendChild(d);
+      }
+    } catch { /* server away: keep the last state */ }
+  }
+  checkBuild();
+  setInterval(checkBuild, 15000);
+
   function repHtml(r) {
     const armName = r.arm === "L" ? "Left" : "Right";
     const bi = r.arm === "L" ? 2 : 0, de = bi + 1;
@@ -555,6 +578,7 @@
     const a = lead.audio, music = $("music");
     // End the voice on "curl!" right when the set arms; duck the music while it talks.
     cdVoiceTimer = setTimeout(() => {
+      if (window.LWAudio?.playElement) { LWAudio.playElement(a, { what: "countdown", dropIfBusy: true }); return; } // ④: one queue
       const vol = music.volume, playing = !music.paused;
       if (playing) music.volume = Math.min(vol, 0.25);
       a.currentTime = 0;
@@ -693,6 +717,7 @@
   // ------------------------------------------------------------ quiet mode
   function applyQuiet(on) {
     QUIET = !!on;
+    syncVoice();
     try { localStorage.setItem("lw.quiet", QUIET ? "1" : "0"); } catch { /* ignore */ }
     $("quietBtn").classList.toggle("on", QUIET);
     $("quietBtn").title = QUIET ? "Quiet mode is on: no audio on any dashboard (Q to turn off)" : "Quiet mode: no audio on any dashboard (Q)";
@@ -804,7 +829,7 @@
         case "live": live = e.pct; liveAt = performance.now(); break;
         case "status": onStatus(e); break;
         case "hello": clientId = e.client_id; break;
-        case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
+        case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; syncVoice(); renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
         case "quiet": applyQuiet(e.on); break;
         case "workout": loadWorkoutSoon(100); break;
         case "workout_summary": wsum = e.summary; renderSoFar(); break;
@@ -931,6 +956,7 @@
   async function playLeadIn(p) {
     if (silent()) { console.info("[say]", LEAD_IN_TEXT); return; }
     const url = await Promise.race([p, sleep(1500).then(() => null)]);
+    if (url && window.LWAudio?.playElement) { LWAudio.playElement(new Audio(url), { what: "lead_in" }); return; } // ④: one queue
     if (url) { try { await new Audio(url).play(); return; } catch { /* fall through */ } }
     playClip("calibrate_flex");
   }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +41,10 @@ export const CLIPS: Record<string, string> = {
   nice_set: "Nice set. Every rep clean.",
   calibrate_relax: "Relax your arms. Stay still.",
   calibrate_flex: "Now flex. Squeeze as hard as you can and hold it.",
+  // The dashboard's countdown / calibration lead-ins (app.js LEAD_TEXT / LEAD_IN_TEXT): cached on disk
+  // like every clip, so /voice/say answers them instantly even right after a server restart.
+  countdown_lead: "Pick them up. Three, two, one, curl!",
+  calibrate_lead_in: "Three. Two. One. Squeeze!",
 };
 
 /** Default cache: server/.cache/voice (gitignored). */
@@ -176,6 +181,21 @@ export function voiceStatus() {
 const sayCache = new Map<string, Buffer>();
 
 const sayInFlight = new Map<string, Promise<Buffer>>();
+const CLIP_BY_TEXT = new Map(Object.entries(CLIPS).map(([k, v]) => [v, k]));
+
+/** Build id of the dashboard's JS (hash of public/app.js, voice-player.js, index.html, read now). */
+const PUBLIC_DIR = fileURLToPath(new URL("../../public/", import.meta.url));
+export function dashboardBuild(): string {
+  const h = createHash("sha1");
+  for (const f of ["app.js", "voice-player.js", "index.html"]) {
+    try {
+      h.update(fs.readFileSync(path.join(PUBLIC_DIR, f)));
+    } catch {
+      h.update(f);
+    }
+  }
+  return h.digest("hex").slice(0, 10);
+}
 
 /** Live TTS: SAY_TTS_MODELS order with a short per-model timeout (tests inject via initVoice's synth). */
 function getSaySynth(): Synth {
@@ -211,6 +231,12 @@ export function spokenPart(text: string, maxWords = SPOKEN_FIRST_SENTENCE_MAX_WO
 export async function speak(text: string): Promise<Buffer> {
   const t = text.trim().slice(0, 600);
   if (!t) throw new Error("empty text");
+  // A fixed line that's also a clip (e.g. the countdown lead): serve the cached clip.
+  const clipKey = CLIP_BY_TEXT.get(t);
+  if (clipKey) {
+    const wav = await getClip(clipKey).catch(() => null);
+    if (wav) return wav;
+  }
   const hit = sayCache.get(t);
   if (hit) return hit;
   const pending = sayInFlight.get(t);
@@ -248,6 +274,8 @@ function wavResponse(wav: Buffer, cache: boolean): Response {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerVoiceRoutes(app: Hono<any, any, any>): void {
   app.get("/voice/clips", (c) => c.json({ ...voiceStatus(), keys: Object.keys(CLIPS), texts: CLIPS }));
+  // The dashboard polls this; if it changes after the tab loaded, the tab's JS is stale -> "Reload this tab".
+  app.get("/voice/build", (c) => c.json({ build: dashboardBuild() }, 200, { "cache-control": "no-store" }));
 
   app.get("/voice/clip/:file", async (c) => {
     const key = c.req.param("file").replace(/\.wav$/i, "");
