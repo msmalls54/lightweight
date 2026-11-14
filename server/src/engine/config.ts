@@ -117,12 +117,14 @@ export const DEFAULT_CONFIG: EngineConfig = {
   restartRise: 0.2,
   // Spec says ~0.6 s. The real swing rep 2 (Nov 13) is only 0.50 s above lo, so 0.4 s.
   minRepMs: 400,
-  // Real reps in all four recordings: <= 2.1 s, plateau <= 1.1 s. Holds: plateau 2.1-3.5 s, 2.4-4.6 s long.
-  maxRepMs: 4000,
-  maxPlateauMs: 1500,
+  // Live run 3 (bilateral 35 lb, slow reps that saturate the ENV): real reps last up to 2.54 s and stay
+  // >= 80% of peak up to 1.79 s, >= 50% up to 2.25 s. Only long holds are rejected: calibration/raise holds
+  // of 3.4-4.6 s, plateau 2.9-3.5 s. Short (2.1-2.7 s) raise holds look like slow reps and can't be told
+  // apart from the biceps; the 2-clean-rep reference keeps them from causing false calls.
+  maxRepMs: 3500,
+  maxPlateauMs: 2500,
   plateauFrac: 0.8,
-  // Real reps: >= 50% of peak for <= 1.44 s. Holds: 2.15-4.2 s.
-  maxSustainMs: 2500,
+  maxSustainMs: 4000,
   sustainFrac: 0.5,
   minPeakFrac: 0.5,
   minGapMs: 400,
