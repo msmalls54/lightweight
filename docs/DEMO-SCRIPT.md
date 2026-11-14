@@ -1,4 +1,4 @@
-﻿# Demo script: 3 minutes
+# Demo script: 3 minutes
 
 Mike on stage, sensors on, 35 lb dumbbell (or band). Laptop on the projector showing the dashboard, Bluetooth speaker on.
 
@@ -20,21 +20,21 @@ Mike on stage, sensors on, 35 lb dumbbell (or band). Laptop on the projector sho
 
 | Time | Beat | Say / do | On screen / audio | Fallback |
 |---|---|---|---|---|
-| 0:00â€“0:15 | **Hook** | "Every lifter cheats reps. A coach next to you sees it. Your phone can't. We gave an AI coach a sense of your body." | Dashboard, body map. | â€” |
-| 0:15â€“0:35 | **Body on screen** | Point at the 4 sensors: "Biceps do the curl. The front delt is the cheat check: when you swing, the shoulder starts the weight." Flex once. | Biceps light up on the map, bars move. | No live signal: start **Replay** of the last good session, keep talking over it. |
-| 0:35â€“1:05 | **Strict reps** | Curl 3â€“4 strict reps, slow. "Strict: biceps does the work." | Rep feed: clean, clean, clean. Music ducks for "Rep one / two / three". | Live set fails: **Replay**. No audio: **Quiet mode** text on screen, read it out. |
-| 1:05â€“1:35 | **Swing** | Swing the next rep: lean back, shoulder up. | Coach: **"Rep 5. Your delt took over."** Music ducks; the front delt pulses red on the map; rep flagged in the feed. Set ends: "Set's done. One cheat rep." then the summary ("Rep 5: right shoulder at 8 times normal, that's a swing."). Report card appears. | Not flagged: show the Replay set with reps 4 and 8 caught at 7â€“9Ã—. No audio: read the coach text on screen. |
-| 1:35â€“1:55 | **"How's my workout?"** | Say it to the laptop mic (or press the button). | "29 of 40 reps clean so far. Rest of the session: end each set at the first cheat." "Workout so far" card. | Mic misses it: press the button. No audio: read the card. |
-| 1:55â€“2:20 | **Ask Claude** | In Claude: "Which rep did I cheat, and which arm is weaker?" | Claude answers from the MCP tools; muscle-map widget with the per-rep scrubber. | Tunnel/connection fails or not verified: mcp-use **inspector** (`/inspector`) running `show_last_set`, or the **screenshot**. |
-| 2:20â€“2:50 | **Beat the agent** | Judge whispers "clean" or "cheat" to Mike before each rep; Mike does 3â€“4 reps. "The judge knows. Does the agent?" | Each rep flagged or clean, live; call-outs on cheats. Score it out loud: agent vs judge. Scoreboard: `challenge_status`. | Disagreement: "That's a data point: every walk-up becomes a labelled rep." |
-| 2:50â€“3:00 | **Close** | "Lightweight: an AI coach that can feel your muscles. Come try to beat it." | Dashboard. | â€” |
+| 0:00–0:15 | **Hook** | "Every lifter cheats reps. A coach next to you sees it. Your phone can't. We gave an AI coach a sense of your body." | Dashboard, body map. | — |
+| 0:15–0:35 | **Body on screen** | Point at the 4 sensors: "Biceps do the curl. The front delt is the cheat check: when you swing, the shoulder starts the weight." Flex once. | Biceps light up on the map, bars move. | No live signal: start **Replay** of the last good session, keep talking over it. |
+| 0:35–1:05 | **Strict reps** | Curl 3–4 strict reps, slow. "Strict: biceps does the work." | Rep feed: clean, clean, clean. Music ducks for "Rep one / two / three". | Live set fails: **Replay**. No audio: **Quiet mode** text on screen, read it out. |
+| 1:05–1:35 | **Swing** | Swing the next rep: lean back, shoulder up. | Coach: **"Rep 5. Your delt took over."** Music ducks; the front delt pulses red on the map; rep flagged in the feed. Set ends: "Set's done. One cheat rep." then the summary ("Rep 5: right shoulder at 8 times normal, that's a swing."). Report card appears. | Not flagged: show the Replay set with reps 4 and 8 caught at 7–9×. No audio: read the coach text on screen. |
+| 1:35–1:55 | **"How's my workout?"** | Say it to the laptop mic (or press the button). | "29 of 40 reps clean so far. Rest of the session: end each set at the first cheat." "Workout so far" card. | Mic misses it: press the button. No audio: read the card. |
+| 1:55–2:20 | **Ask Claude** | In Claude: "Which rep did I cheat, and which arm is weaker?" | Claude answers from the MCP tools; muscle-map widget with the per-rep scrubber. | Tunnel/connection fails or not verified: mcp-use **inspector** (`/inspector`) running `show_last_set`, or the **screenshot**. |
+| 2:20–2:50 | **Beat the agent** | Judge whispers "clean" or "cheat" to Mike before each rep; Mike does 3–4 reps. "The judge knows. Does the agent?" | Each rep flagged or clean, live; call-outs on cheats. Score it out loud: agent vs judge. Scoreboard: `challenge_status`. | Disagreement: "That's a data point: every walk-up becomes a labelled rep." |
+| 2:50–3:00 | **Close** | "Lightweight: an AI coach that can feel your muscles. Come try to beat it." | Dashboard. | — |
 
 ## If everything breaks
 
 1. **Replay** the best recorded session: dashboard, voice and cards behave exactly like live.
 2. **Quiet mode** if audio misbehaves: every line still shows as text.
 3. **Screenshots** for Claude and the report card.
-4. Talk numbers: 0 strict reps flagged across 3 real recordings; live swings on reps 4 and 8 caught at 7â€“9Ã— normal.
+4. Talk numbers: 0 strict reps flagged across 3 real recordings; live swings on reps 4 and 8 caught at 7–9× normal.
 
 ## Words to use
 

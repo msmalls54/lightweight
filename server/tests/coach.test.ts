@@ -11,6 +11,7 @@ import {
   mentionsLoadChange,
   pickCue,
   pickCueSequence,
+  _resetCueMemory,
   pickSetEndCue,
   setBrain,
   summarizeSet,
@@ -55,8 +56,14 @@ test("pickCue: cheat beats everything; preacher says elbows", () => {
 });
 
 test("pickCue: imbalance, tempo, count", () => {
-  assert.equal(pickCue(rep({ r_share: 0.7 })), "left_slacking"); // right doing the work
-  assert.equal(pickCue(rep({ r_share: 0.3 })), "right_slacking");
+  const both = { peak_pct: [0.9, 0.15, 0.9, 0.15] }; // both biceps curled
+  const prevL = rep({ ...both, rep: 2, r_share: 0.7 });
+  const prevR = rep({ ...both, rep: 2, r_share: 0.3 });
+  assert.equal(pickCue(rep({ ...both, r_share: 0.7 }), { prevRep: prevL }), "left_slacking"); // right doing the work, 2 in a row
+  assert.equal(pickCue(rep({ ...both, r_share: 0.3 }), { prevRep: prevR }), "right_slacking");
+  assert.equal(pickCue(rep({ ...both, r_share: 0.7 }), { prevRep: null }), "rep_3"); // first imbalanced rep: no cue yet
+  assert.equal(pickCue(rep({ ...both, r_share: 0.7 }), { prevRep: prevR }), "rep_3"); // other side: no streak
+  assert.equal(pickCue(rep({ r_share: 0.7 }), { prevRep: prevL }), "rep_3"); // left biceps didn't curl: not an imbalance
   assert.equal(pickCue(rep({ r_share: 0.5 })), "rep_3");
   assert.equal(pickCue(rep({ up_ms: 250 })), "slow_it_down");
   assert.equal(pickCue(rep({ up_ms: 350 })), "rep_3"); // engine fastUpMs = 300
@@ -64,8 +71,24 @@ test("pickCue: imbalance, tempo, count", () => {
   assert.equal(pickCue(rep({ rep: 20 })), "rep_20");
   assert.equal(pickCue(rep({ rep: 21 })), "clean_rep");
   assert.deepEqual(pickCueSequence(rep({ rep: 4 })), ["rep_4"]);
-  assert.deepEqual(pickCueSequence(rep({ rep: 4, r_share: 0.7 })), ["rep_4", "left_slacking"]);
+  assert.deepEqual(pickCueSequence(rep({ ...both, rep: 4, r_share: 0.7 }), { prevRep: prevL }), ["rep_4", "left_slacking"]);
   assert.equal(pickCue({ type: "live" } as unknown as RepEvent), null);
+});
+
+test("imbalance cue from memory: once per streak, per set; one-arm reps never count", () => {
+  _resetCueMemory();
+  const both = { peak_pct: [0.9, 0.15, 0.9, 0.15] };
+  const seq = [0.3, 0.3, 0.3, 0.5, 0.3, 0.3].map((r_share, i) => pickCue(rep({ ...both, set_id: "imb", rep: i + 1, r_share })));
+  assert.deepEqual(seq, ["rep_1", "right_slacking", "rep_3", "rep_4", "rep_5", "right_slacking"]);
+  // Mike's zdw reps 1-2 were right-arm only (r_share ~0.98): no cue.
+  _resetCueMemory();
+  const oneArm = [1, 2].map((n) => pickCue(rep({ set_id: "one", rep: n, r_share: 0.98, peak_pct: [0.9, 0.9, 0.05, 0.3] })));
+  assert.deepEqual(oneArm, ["rep_1", "rep_2"]);
+  // Real set r82 set 1: "right side's slacking" twice (reps 6 and 10), not on most reps.
+  _resetCueMemory();
+  const r82 = JSON.parse(fs.readFileSync(new URL("../src/coach/fixtures/real-session-s-1114-122526-r82.json", import.meta.url), "utf8"));
+  const cues = (r82.sets[0].set_end.reps as RepEvent[]).map((r) => pickCue(r));
+  assert.deepEqual(cues.map((c, i) => (c === "right_slacking" ? i + 1 : 0)).filter(Boolean), [6, 10]);
 });
 
 test("pickSetEndCue follows the engine decision", () => {

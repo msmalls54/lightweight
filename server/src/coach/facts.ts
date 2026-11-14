@@ -303,6 +303,11 @@ export function decisionShort(next: string): string {
   return DECISION_SHORT[next] ?? "Same weight, keep going.";
 }
 
+/** "1 rep", "3 reps" (also "1 set", "2 cheats"). */
+export function plural(n: number | null | undefined, word: string): string {
+  return `${n ?? 0} ${word}${n === 1 ? "" : "s"}`;
+}
+
 /** "4", "4 and 8", "4, 5 and 8" */
 export function listReps(ns: number[]): string {
   if (ns.length <= 1) return ns.join("");
@@ -311,7 +316,10 @@ export function listReps(ns: number[]): string {
 
 /** Multiples for a group of reps: "9 times", "9 and 7 times", "8 to 12 times" (unit "x" for the card). */
 function multiples(rs: ReturnType<typeof repFacts>[], unit: "times" | "x"): string {
-  const v = rs.map((r) => r.up_delt_x_clean).filter((x): x is number => x != null).map((x) => Math.round(x));
+  const v = rs
+    .map((r) => r.up_delt_x_clean)
+    .filter((x): x is number => x != null)
+    .map((x) => (x < 2 ? Math.round(x * 10) / 10 : Math.round(x))); // never "1 times"
   if (!v.length) return "";
   const u = unit === "x" ? "x" : " times";
   if (v.length === 1) return `${v[0]}${u}`;
@@ -337,7 +345,8 @@ export function fallbackSummary(set: SetEndEvent): string {
   if (f.total_reps === 0) return `No reps counted. ${decision}`;
   if (f.reference_status === "learning" && f.cheats === 0)
     return `Still learning your clean rep, so no calls yet. ${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in, keep them strict.`;
-  if (f.cheats === 0) return `All ${f.total_reps} reps clean, shoulder in its normal range. ${cleanSetCue(f)} ${decision}`;
+  if (f.cheats === 0)
+    return `${f.total_reps === 1 ? "1 rep, clean" : `All ${f.total_reps} reps clean`}, shoulder in its normal range. ${cleanSetCue(f)} ${decision}`;
   const cheatsF = f.reps.filter((r) => r.verdict === "cheat");
   if (f.cheat_pattern.startsWith("fatigue") && cheatsF.length >= 3) {
     const m = multiples(cheatsF, "times");
@@ -372,7 +381,7 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
   else if (f.reference_reps.length)
     bullets.push(`Rep${f.reference_reps.length > 1 ? "s" : ""} ${listReps(f.reference_reps)} set your clean reference; the other reps are judged against ${f.reference_reps.length > 1 ? "them" : "it"}.`);
   if (f.all_clean && f.reference_status === "set")
-    bullets.push(`All ${f.total_reps} reps clean: your shoulder stayed in its normal range on the way up.`);
+    bullets.push(`${f.total_reps === 1 ? "The rep was clean" : `All ${f.total_reps} reps clean`}: your shoulder stayed in its normal range on the way up.`);
   if (big.length)
     bullets.push(
       `Rep${big.length > 1 ? "s" : ""} ${listReps(big.map((r) => r.rep))}: ${side(big[0].arm)} shoulder did ${multiples(big, "x")} its normal share on the way up. Swing.`,
@@ -395,7 +404,7 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
   const last = lastSessionFacts(lastDay, opts.lift);
   if (last) {
     const s = last.sets.at(-1)!;
-    bullets.push(`Vs ${last.date}, same lift: ${s.cheats ?? "?"} cheat${s.cheats === 1 ? "" : "s"} in ${s.reps ?? "?"} reps; today ${f.cheats} in ${f.total_reps}.`);
+    bullets.push(`Vs ${last.date}, same lift: ${plural(s.cheats, "cheat")} in ${plural(s.reps, "rep")}; today ${f.cheats} in ${f.total_reps}.`);
   }
   const headline =
     f.total_reps === 0
@@ -403,8 +412,10 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
       : f.cheats === 0
         ? f.reference_status === "learning"
           ? `${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in, learning your clean rep`
-          : `All ${f.total_reps} reps clean`
-        : `${f.cheats} cheat${f.cheats > 1 ? "s" : ""} in ${f.total_reps} reps${f.first_cheat_rep ? `, first at rep ${f.first_cheat_rep}` : ""}`;
+          : f.total_reps === 1
+            ? "1 rep, clean"
+            : `All ${f.total_reps} reps clean`
+        : `${plural(f.cheats, "cheat")} in ${plural(f.total_reps, "rep")}${f.first_cheat_rep ? `, first at rep ${f.first_cheat_rep}` : ""}`;
   const cue = big.length
     ? "Pin your elbows and keep your torso still; the moment your shoulder joins in, end the set."
     : f.cheats === 0

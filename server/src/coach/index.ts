@@ -1,6 +1,6 @@
 // ④ Coach brain (BUILD.md). Code decides; Gemini 4 Hydrogen only phrases.
 export { buildCoachContext, localDate, coachDir, type CoachContext, type Checkin } from "./context.js";
-export { pickCue, pickCueSequence, pickSetEndCue, pickSetEndCueSequence, CUE_CONFIG, type PickCueOptions } from "./cues.js";
+export { pickCue, pickCueSequence, pickSetEndCue, pickSetEndCueSequence, repImbalance, _resetCueMemory, CUE_CONFIG, type PickCueOptions } from "./cues.js";
 export { summarizeSet, summarizeSetDetail, summarizeSession, isWorkoutQuestion, answer, setBrain, geminiBrain, SYSTEM_PROMPT, type Brain, type BrainOptions } from "./brain.js";
 export { writeTodayHistory, codeTakeaways, type SetMeta, type WriteHistoryOptions } from "./history.js";
 export {

@@ -1,7 +1,7 @@
 // Workout-level coach: "so far today" across all sets, while Mike is mid-workout.
 // Code computes every number and picks the one thing to fix; Gemini only phrases it.
 import type { CoachContext } from "./context.js";
-import { listReps, sameLift, setFacts, type LiftKey } from "./facts.js";
+import { listReps, plural, sameLift, setFacts, type LiftKey } from "./facts.js";
 import type { Arm, SetEndEvent } from "./types.js";
 
 /** A set counts toward trends only with at least this many reps (shorter ones are test/warm-up blips). */
@@ -202,7 +202,7 @@ export function fallbackSession(input: Required<WorkoutInput>): SessionSummary {
   for (const e of w.exercises.slice(0, 2)) {
     const seq = e.cheats_per_working_set.map((s) => s.cheats).join(", ");
     bullets.push(
-      `${cap(e.label)}: ${e.sets} set${e.sets === 1 ? "" : "s"}, ${e.clean} of ${e.reps} reps clean${e.working_sets > 1 ? `; cheats per working set ${seq}` : ""}.`,
+      `${cap(e.label)}: ${plural(e.sets, "set")}, ${e.clean} of ${plural(e.reps, "rep")} clean${e.working_sets > 1 ? `; cheats per working set ${seq}` : ""}.`,
     );
     if (e.working_sets > 1)
       bullets.push(
@@ -219,7 +219,7 @@ export function fallbackSession(input: Required<WorkoutInput>): SessionSummary {
     const longs = e.first_cheat_rep_long_sets.filter((x) => x.rep >= 4);
     if (longs.length) bullets.push(`Fatigue: in your longer sets the shoulder took over from rep ${listReps(longs.map((x) => x.rep))}.`);
     if (e.best_set && e.working_sets > 1)
-      bullets.push(`Best set: set ${e.best_set.set}, ${e.best_set.reps} reps${e.best_set.cheats ? `, ${e.best_set.cheats} cheat${e.best_set.cheats > 1 ? "s" : ""}` : ", all clean"}.`);
+      bullets.push(`Best set: set ${e.best_set.set}, ${plural(e.best_set.reps, "rep")}${e.best_set.cheats ? `, ${plural(e.best_set.cheats, "cheat")}` : ", all clean"}.`);
   }
   const loggedBullets: string[] = [];
   for (const l of w.logged.slice(0, 2))
@@ -228,9 +228,9 @@ export function fallbackSession(input: Required<WorkoutInput>): SessionSummary {
   const headline =
     t.reps === 0
       ? "No sensed sets yet today"
-      : `${t.working_sets || t.sets} ${t.working_sets ? "working " : ""}set${(t.working_sets || t.sets) === 1 ? "" : "s"} so far: ${t.clean} of ${t.reps} reps clean`;
+      : `${plural(t.working_sets || t.sets, t.working_sets ? "working set" : "set")} so far: ${t.clean} of ${plural(t.reps, "rep")} clean`;
   const spoken = clampWords(
-    t.reps === 0 ? `No sets yet. ${w.focus.text}` : `${t.clean} of ${t.reps} reps clean so far. ${shortFocus(w.focus.key)}`,
+    t.reps === 0 ? `No sets yet. ${w.focus.text}` : `${t.clean} of ${plural(t.reps, "rep")} clean so far. ${shortFocus(w.focus.key)}`,
     WORKOUT_SPOKEN_MAX_WORDS,
   );
   const all = [...bullets.slice(0, 5 - loggedBullets.length), ...loggedBullets];
