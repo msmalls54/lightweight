@@ -149,6 +149,8 @@
   @keyframes pulseGreen { from { fill: #22C55E; } }
   #map polygon.pulse-red { animation: pulseRed 1.2s ease-out; }
   #map polygon.pulse-green { animation: pulseGreen 1.2s ease-out; }
+  @keyframes pulseAmber { from { fill: #F59E0B; } }
+  #map polygon.pulse-amber { animation: pulseAmber 1.2s ease-out; }
 
   /* ---------------------------------------------------------------- right: coach */
   #coachCard { gap: 10px; }
@@ -167,7 +169,8 @@
   #sofar:empty::before { content: "Today's sets and the coach's take show up here."; color: var(--muted); }
   #reportTitle { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   #reportTitle .src { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--muted); }
-  #coach { font-size: var(--fs-l); line-height: 1.35; color: var(--text); }
+  #coachScroll > * { flex: none; } /* never squeeze a block: the column scrolls instead of clipping */
+  #coach { font-size: var(--fs-m); font-weight: 600; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
   #coach:empty { display: none; }
   #report { font-size: var(--fs-m); line-height: 1.45; }
   #report:empty { display: none; }
