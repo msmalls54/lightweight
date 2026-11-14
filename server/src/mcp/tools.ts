@@ -7,7 +7,7 @@ import type { Store } from "../store.js";
 import { HttpError, type Pipeline } from "../pipeline.js";
 import { buildCoachContext } from "../modules.js";
 import { REPO_ROOT } from "../paths.js";
-import { getReps, muscleMapView, compareArms, compareCurls, challengeStatus, type MuscleMapView } from "./data.js";
+import { getReps, muscleMapView, compareArms, compareCurls, challengeStatus, RAW_NOTE, type MuscleMapView } from "./data.js";
 
 export const SCOPE = "Readings are relative muscle activation (%MVC from this session's calibration, and shares between muscles). Not force, not muscle growth, not medical. The code decides which reps are cheats; explain its flags, never re-judge them.";
 const STYLE = "Answer like a blunt gym coach in one or two short sentences.";
@@ -23,10 +23,12 @@ const pctS = (x: number) => `${Math.round(x * 100)}%`;
 
 function mapMessage(v: MuscleMapView) {
   const s = v.set;
-  const cheats = v.reps.filter(r => r.cheat);
-  const cheatTxt = cheats.length ? `cheat reps: ${[...new Set(cheats.map(r => `${r.rep}${v.arms.length > 1 ? r.arm : ""}`))].join(", ")} (delt took over)` : "no cheat reps";
-  const bal = s.r_share !== null ? `; R/L biceps share ${pctS(s.r_share)}/${pctS(1 - s.r_share)}` : "";
-  return `${v.person}${v.walkup ? " (walk-up)" : ""}, set ${s.set_no}: ${s.exercise} ${s.variant}${s.load_lb != null ? ` ${s.load_lb} lb` : ""}, ${s.reps} reps, ${s.clean} clean, ${cheatTxt}; avg delt share ${s.avg_delt_share === null ? "n/a" : pctS(s.avg_delt_share)}${bal}.${s.coach_line ? ` Coach: ${s.coach_line}` : ""}`;
+  const byRep = new Map<number, { x: number | null; verdict: string }>();
+  for (const r of v.reps) { const p = byRep.get(r.rep); if (!p || r.verdict === "cheat" || (r.verdict === "loose" && p.verdict !== "cheat")) byRep.set(r.rep, { x: r.shoulder_help_x, verdict: r.verdict }); }
+  const cheats = [...byRep].filter(([, r]) => r.verdict === "cheat").map(([n, r]) => `${n}${r.x != null ? ` (${r.x}x shoulder help)` : ""}`);
+  const loose = [...byRep].filter(([, r]) => r.verdict === "loose").map(([n, r]) => `${n}${r.x != null ? ` (${r.x}x)` : ""}`);
+  const bal = s.balance.r_share !== null ? `; L/R biceps balance (both-arm reps ${s.balance.reps_with_both_arms.join(",")}): ${pctS(s.balance.r_share)} right / ${pctS(1 - s.balance.r_share)} left, ${s.balance.verdict}` : `; ${s.balance.verdict}`;
+  return `${v.person}${v.walkup ? " (walk-up)" : ""}, set ${s.set_no}: ${s.exercise} ${s.variant}${s.load_lb != null ? ` ${s.load_lb} lb` : ""}, ${s.reps} reps, ${s.clean} clean; ${cheats.length ? `cheat reps ${cheats.join(", ")}` : "no cheat reps"}${loose.length ? `; loose ${loose.join(", ")}` : ""}${bal}.${s.coach_line ? ` Coach: ${s.coach_line}` : ""} ${RAW_NOTE}`;
 }
 
 export function registerTools(server: MCPServer, store: Store, pipeline: Pipeline) {
@@ -75,7 +77,7 @@ export function registerTools(server: MCPServer, store: Store, pipeline: Pipelin
 
   server.tool({
     name: "get_reps",
-    description: `Read reps by session/set: per-rep %MVC (biceps and front delt peak/mean), delt_share, cheat flag and reason, R/L share, tempo; per-set clean/cheat counts and the coach line. Use it for 'which rep did I cheat?' and 'how was that set?'. ${SCOPE}`,
+    description: `Read reps by session/set. Lead with each rep's verdict (clean/loose/cheat) and shoulder_help_x (shoulder help on the way up vs this person's clean reps); raw_effort %MVC is context only. Per set: clean/cheat counts, balance (L/R only over reps where both arms curled) and the coach line. Use it for 'which rep did I cheat?' and 'how was that set?'. ${SCOPE}`,
     schema: z.object({ session_id: sessionArg, set_no: setArg, only_cheats: z.boolean().default(false) }),
     annotations: RO,
   }, async a => {
@@ -106,7 +108,7 @@ export function registerTools(server: MCPServer, store: Store, pipeline: Pipelin
     const v = muscleMapView(store, { session_id: a.session_id });
     if (!c || !v) return widget({ props: { empty: true, mode: "arms" }, message: "No sets recorded yet." });
     const msg = c.sets.length
-      ? `R/L biceps share over ${c.sets.length} bilateral set(s): ${c.overall_r_share === null ? "n/a" : `${pctS(c.overall_r_share)} right / ${pctS(1 - c.overall_r_share)} left`}; weaker arm: ${c.weaker_arm}. Per set: ${c.sets.map(s => `set ${s.set_no} ${s.r_share === null ? "n/a" : pctS(s.r_share)}${s.flagged ? " (flagged)" : ""}, cheats R${s.r_cheats}/L${s.l_cheats}`).join("; ")}.`
+      ? `L/R biceps balance (only reps where both arms curled): ${c.overall_r_share === null ? c.overall_verdict : `${pctS(c.overall_r_share)} right / ${pctS(1 - c.overall_r_share)} left, ${c.overall_verdict}; weaker arm: ${c.weaker_arm}`}. Per set: ${c.sets.map(s => `set ${s.set_no} ${s.r_share === null ? s.verdict : `${pctS(s.r_share)} right`}${s.flagged ? " (flagged)" : ""}, cheats R${s.r_cheats}/L${s.l_cheats}`).join("; ")}. Same rule as show_last_set and get_reps.`
       : "No two-arm sets in this session, so there's no L/R comparison.";
     return widget({ props: { ...v, mode: "arms", arms_compare: c }, message: msg });
   });
