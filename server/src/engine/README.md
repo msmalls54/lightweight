@@ -56,9 +56,11 @@ Per rep: peak and mean %MVC for all 4 channels over the window. `up_ms` = onset 
 ## CoachDecision (set end)
 
 Rules from `data/coach/plan.json`, with the values copied into config (no file reads). **The load never changes.**
-1. First cheat rep < `earlyCheatBeforeRep` (6) in `earlyCheatSetsInRow` (2, per plan's "two sets in a row") consecutive sets of the session → `stop_at_first_cheat_rest_longer`. The first such set returns `continue` with a warning in `reason`. Set `earlyCheatSetsInRow: 1` to fire on the first one. Sets with 0 reps don't touch the streak; a set without an early cheat resets it.
-2. More than half the reps (and ≥ 3 reps) have `up_ms < 300` → `slow_the_tempo`.
-3. Else `continue`. The reason sums up clean vs cheat and mentions the plan's 1-cheat-rep-per-set limit.
+Checked in this order:
+1. **Too many cheats:** cheat reps > `maxCheatRepsPerSet` (1, plan's `max_cheat_reps_per_set`) → `stop_at_first_cheat_rest_longer`, e.g. "3 cheat reps (first at rep 2); the plan allows 1 cheat rep. Next set, stop at the first cheat and rest longer. Same weight."
+2. **Early-cheat streak:** first cheat rep < `earlyCheatBeforeRep` (6) in `earlyCheatSetsInRow` (2, per plan's "two sets in a row") consecutive sets of the session → `stop_at_first_cheat_rest_longer`. The first such set returns `continue` with a warning in `reason`. Set `earlyCheatSetsInRow: 1` to fire on the first one. The streak counts every set, including ones that rule 1 already stopped. Sets with 0 reps don't touch it; a set without an early cheat resets it.
+3. **Tempo:** more than half the reps (and ≥ 3 reps) have `up_ms < 300` → `slow_the_tempo`.
+4. Else `continue`. The reason sums up clean vs cheat.
 
 ## Real data (Nov 13 bench, `tests/engine-real.test.ts`)
 
@@ -67,7 +69,7 @@ Rest 570/495, MVC 14960, 20 Hz, each phase fed as its own set:
 | Phase | Reps | delt_share per rep | Flagged |
 |---|---|---|---|
 | strict_curls | 3 | 0.096, 0.093, 0.098 (mean 0.096) | none |
-| cheat_curls | 4 | 0.219, 0.657, 0.476, 0.565 (mean 0.48) | reps 2–4 (`delt_share_jump`) |
+| cheat_curls | 4 | 0.219, 0.657, 0.476, 0.565 (mean 0.48) | reps 2–4 (`delt_share_jump`) → `stop_at_first_cheat_rest_longer` |
 
 Swing rep 1 (share 0.22, delt peak 0.35) is a light swing and stays unflagged under both rules. The phase labels in the CSV lag the movement: each "curls" phase ends mid-rep, and the following "rest" phase holds one more rep.
 

@@ -72,6 +72,9 @@ test("real swing curls: 4 reps, flagged, delt share ~0.46", () => {
   assert.ok(set.cheats >= 3, `cheats ${set.cheats}`);
   assert.deepEqual(set.reps.slice(1).map((r) => r.cheat), [true, true, true]);
   assert.equal(set.first_cheat_rep, 2);
+  // 3 cheat reps > plan's max of 1 per set
+  assert.equal(set.decision.next, "stop_at_first_cheat_rest_longer");
+  assert.match(set.decision.reason, /^3 cheat reps \(first at rep 2\)/);
   // swing reps use less biceps than strict ones (momentum did the work)
   const strict = runPhase("strict_curls");
   assert.ok(mean(set.reps.map((r) => r.mean_pct[0])) < mean(strict.reps.map((r) => r.mean_pct[0])));

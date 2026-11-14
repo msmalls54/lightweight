@@ -294,6 +294,14 @@ export class Engine {
     const streak = this.earlyStreak.count;
     const same = "Same weight.";
 
+    if (cheats > cfg.maxCheatRepsPerSet) {
+      const allows = `${cfg.maxCheatRepsPerSet} cheat rep${cfg.maxCheatRepsPerSet === 1 ? "" : "s"}`;
+      return {
+        next: "stop_at_first_cheat_rest_longer",
+        reason: `${cheats} cheat reps (first at rep ${first}); the plan allows ${allows}. Next set, stop at the first cheat and rest longer. ${same}`,
+      };
+    }
+
     if (early && streak >= cfg.earlyCheatSetsInRow) {
       const sets = streak === 1 ? "" : ` in ${streak} sets in a row`;
       return {
@@ -313,7 +321,6 @@ export class Engine {
     const parts: string[] = [];
     if (cheats === 0) parts.push(`All ${reps.length} reps clean.`);
     else parts.push(`${reps.length - cheats} clean, ${cheats} cheat (first at rep ${first}).`);
-    if (cheats > cfg.maxCheatRepsPerSet) parts.push(`Plan allows ${cfg.maxCheatRepsPerSet} cheat rep per set.`);
     if (early) {
       parts.push(
         `Delt took over before rep ${cfg.earlyCheatBeforeRep}; if the next set does that too, stop at the first cheat and rest longer.`,
