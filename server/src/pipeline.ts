@@ -16,6 +16,13 @@ export const MVC_PERCENTILE = 0.99;
 export const AUTO_REST = { windowMs: 5000, percentile: 0.1, minSamples: 200, minChange: 25 } as const;
 const DEFAULT_CAL: Calibration = { rest: [550, 550, 550, 550], mvc: [14960, 14960, 14960, 14960], ok: true, problems: [] };
 export type CalSource = "saved" | "calibrated" | "auto";
+/** Live run: a weak flex saved R biceps MVC 5118 vs L 14857, so R read ~3x more sensitive. Never load or
+ *  persist an MVC under 9000: lift it to 80% of the ENV ceiling and let the engine's auto-raise go up from there. */
+export const MVC_FLOOR = { below: 9000, to: Math.round(14960 * 0.8) } as const;
+export function floorMvc(c: Calibration): Calibration {
+  const mvc = c.mvc.map(m => (m < MVC_FLOOR.below ? Math.max(m, MVC_FLOOR.to) : m));
+  return mvc.every((m, i) => m === c.mvc[i]) ? c : { ...c, mvc };
+}
 /** Fewer distinct reps than this: no coach summary ("set too short"). */
 export const MIN_REPS_FOR_SUMMARY = 3;
 
@@ -152,7 +159,7 @@ export class Pipeline {
   private applyRaised(sess: Sess, cal: Calibration) {
     const before = sess.calibration?.mvc ?? DEFAULT_CAL.mvc;
     sess.calibration = cal;
-    if (sess.kind !== "replay") this.store.saveCalibration(sess.id, cal);
+    this.persistCal(sess, cal);
     console.log(`[cal] ${sess.id} MVC raised from the set: ${before.join("/")} -> ${cal.mvc.join("/")}`);
     this.hub.send({ type: "calibration", phase: "raised", before, ...cal });
   }
@@ -196,12 +203,13 @@ export class Pipeline {
     const sess = this.newSess(o);
     this.live = sess;
     if (!sess.isWalkUp) {
-      const saved = this.store.lastCalibration(sess.person);
+      const stored = this.store.lastCalibration(sess.person);
+      const saved = stored ? floorMvc(stored) : null;
       if (saved) {
         sess.engine.setCalibration(saved);
         sess.calibration = saved;
         sess.calSource = "saved";
-        this.store.saveCalibration(sess.id, saved);
+        this.persistCal(sess, saved);
         this.log(sess, "calibration", saved); // replay starts from the same values
         console.log(`[cal] ${sess.id} loaded ${sess.person}'s saved calibration: rest ${saved.rest.join("/")} mvc ${saved.mvc.join("/")}`);
       }
@@ -228,6 +236,11 @@ export class Pipeline {
       const sets = this.store.todaySetEnds(sess.person);
       if (sets.length) writeTodayHistory(sets, { person: sess.person, setMeta: this.store.todaySetMeta(sess.person) });
     } catch (err) { console.error("[coach] writeTodayHistory failed:", errMsg(err)); }
+  }
+
+  /** Store a session's calibration (floored). Replay sessions never write. */
+  private persistCal(sess: Sess, cal: Calibration) {
+    if (sess.kind !== "replay") this.store.saveCalibration(sess.id, floorMvc(cal));
   }
 
   private log(sess: Sess, kind: string, payload: unknown) {
@@ -263,7 +276,7 @@ export class Pipeline {
     const cal: Calibration = { ...base, rest };
     sess.engine.setCalibration(cal);
     sess.calibration = cal;
-    if (sess.kind !== "replay") this.store.saveCalibration(sess.id, cal);
+    this.persistCal(sess, cal);
     this.hub.send({ type: "calibration", phase: "rest", rest, mvc: cal.mvc });
   }
 
@@ -357,9 +370,9 @@ export class Pipeline {
     // Channels not flexed (unused arm on a walk-up): assume the ENV ceiling, like the Nov 13 bench test.
     const mvc = sess.cal.mvc.map(m => m ?? new Array(len).fill(ENV_CEILING));
     let cal: Calibration;
-    try { cal = sess.engine.calibrate(rest, mvc, sess.arms); }
+    try { cal = floorMvc(sess.engine.calibrate(rest, mvc, sess.arms)); }
     catch (e) { throw new HttpError(400, `Calibration failed: ${errMsg(e)}`); }
-    this.store.saveCalibration(sess.id, cal);
+    this.persistCal(sess, cal);
     this.log(sess, "calibration", cal);
     sess.calSource = "calibrated";
     this.applyCalDone(sess, cal);

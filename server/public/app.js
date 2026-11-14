@@ -212,6 +212,13 @@
     $("armState").className = "armstate idle"; $("armState").textContent = "IDLE";
     $("coach").textContent = "";
   }
+  // Both arms' MVCs, so an imbalance like 5k vs 15k is visible (each %MVC is relative to its own MVC).
+  function mvcText(mvc) {
+    if (!mvc) return " · MVC default";
+    const k = x => `${(x / 1000).toFixed(1)}k`;
+    const lop = (a, b) => Math.max(a, b) / Math.max(1, Math.min(a, b)) > 1.5 ? " ⚠" : "";
+    return ` · MVC biceps R ${k(mvc[0])} / L ${k(mvc[2])}${lop(mvc[0], mvc[2])} · delt R ${k(mvc[1])} / L ${k(mvc[3])}${lop(mvc[1], mvc[3])}`;
+  }
   function onStatus(s) {
     lastStatus = s;
     if (firstStatus) {
@@ -237,7 +244,7 @@
     }
     if (ss) {
       activeArms = s.set?.arms ?? ss.arms;
-      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "calibrating…" : `calibration: ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "calibrated" : "auto"}${ss.cal_problems?.length ? " ⚠" : ""}`}</small>`;
+      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "calibrating…" : `calibration: ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "calibrated" : "auto"}${ss.cal_problems?.length ? " ⚠" : ""}${mvcText(ss.mvc)}`}</small>`;
     } else $("who").textContent = "No session";
     const armed = !!s.set && !ss?.calibrating;
     $("armState").className = `armstate ${armed ? "armed" : "idle"}`;
