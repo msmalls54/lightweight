@@ -58,3 +58,12 @@ over." = 3.7 s including duck/restore.
 - `npx tsx --test tests/voice.test.ts tests/coach.test.ts` (Gemini mocked).
 - `npx tsx scripts/voice-smoke.ts [--all]`: 3 live clips with latency, Hydrogen Q&A on the real Nov 13 history,
   a set summary, a walk-up answer; `--all` pre-generates every clip.
+
+## Workout so far (`summarizeSession`)
+```ts
+summarizeSession(ctx, { logged?: LoggedLift[], sets?: { set, lift }[] }) -> Promise<SessionSummary>
+// SessionSummary = { headline, bullets: string[3–5], focus_next, spoken (<= 20 words), totals: { sets, working_sets, reps, clean, cheats }, source: "gemini" | "code" }
+```
+`sets` defaults to `ctx.today.sets` + `ctx.today.setMeta`. Code computes the trend (cleaner/sloppier/steady over
+working sets of 3+ reps), fatigue (first cheat rep in 6+ rep sets), which arm cheats, the best set, and picks
+`focus_next`; Gemini phrases it. `answer(ctx, "how's my workout going?")` returns the `spoken` line.

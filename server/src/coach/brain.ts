@@ -22,6 +22,15 @@ import {
   type LiftKey,
   type SetDetail,
 } from "./facts.js";
+import {
+  fallbackSession,
+  workoutFacts,
+  workoutInputFromContext,
+  WORKING_SET_MIN_REPS,
+  WORKOUT_SPOKEN_MAX_WORDS,
+  type SessionSummary,
+  type WorkoutInput,
+} from "./session.js";
 import type { SetEndEvent, Variant } from "./types.js";
 
 export interface BrainOptions {
@@ -201,9 +210,14 @@ function fitWords(text: string, max: number): string {
 }
 
 /** Rules every LLM line must pass, or the code line is used instead. */
-function breaksRules(text: string, opts: { historyAllowed: boolean }): boolean {
+function breaksRules(text: string, opts: { historyAllowed: boolean; knownLoads?: number[] }): boolean {
+  // Loads that are facts (e.g. a logged lift at 120 lb) may be named; any other number of pounds may not.
+  const loadText = (opts.knownLoads ?? []).reduce(
+    (t, n) => t.replace(new RegExp(`\\b${n}\\s*(lb|lbs|pounds?)\\b`, "gi"), "the logged load"),
+    text,
+  );
   return (
-    mentionsLoadChange(text) ||
+    mentionsLoadChange(loadText) ||
     mentionsMedical(text) ||
     mentionsRawShare(text) ||
     (!opts.historyAllowed && mentionsHistory(text))
@@ -306,6 +320,8 @@ Never quote a raw shoulder/delt percentage. Only JSON, no prose around it.`;
 export async function answer(ctx: CoachContext, question: string): Promise<string> {
   const q = String(question ?? "").trim().slice(0, 500);
   if (!q) return "Ask me something about your sets.";
+  // "How's my workout going?" -> the <= 20-word workout line (same facts as the Workout so far card).
+  if (isWorkoutQuestion(q) && ctx.today.sets.length) return (await summarizeSession(ctx)).spoken;
   const prompt = `${contextBlock(ctx)}
 
 QUESTION: ${q}
@@ -323,5 +339,55 @@ Answer out loud in at most 3 short sentences, using only the data above. When it
     return last
       ? `Coach brain is offline. Last set: ${fallbackSummary(last)}`
       : "Coach brain is offline and there are no sets yet today.";
+  }
+}
+
+// ---------------------------------------------------------------- workout so far
+
+/** "How's my workout going?" style questions get the <= 20-word workout line. */
+export function isWorkoutQuestion(q: string): boolean {
+  const t = q.toLowerCase();
+  if (/\brep\s*\d|\bwhich (rep|arm|set)\b/.test(t)) return false;
+  return /\bworkout\b|\bsession\b|\bso far\b|\bhow('?s| is| am i| are we)\b[^?]*\b(going|doing)\b/.test(t);
+}
+
+/**
+ * "Workout so far" card while Mike is mid-workout: trend across sets, when fatigue starts, which arm,
+ * best set, and the one thing to fix next (code-chosen focus; Gemini phrases). Never throws.
+ */
+export async function summarizeSession(ctx: CoachContext, workout?: WorkoutInput): Promise<SessionSummary> {
+  const input = workoutInputFromContext(ctx, workout);
+  const fallback = fallbackSession(input);
+  if (!input.sets.length && !input.logged.length) return fallback;
+  const w = workoutFacts(input);
+  const prompt = `PERSON: ${ctx.person}${ctx.isWalkUp ? " (walk-up)" : ""}
+PROFILE: ${compact(ctx.profile)}
+PLAN: ${compact(ctx.plan)}
+WORKOUT_SO_FAR (today, computed by code; sets numbered per exercise in order; working sets have ${WORKING_SET_MIN_REPS}+ reps): ${compact(w)}
+FOCUS (chosen by code, restate it): ${w.focus.text}
+
+The lifter is MID-WORKOUT. Write the "Workout so far" card as a JSON object:
+{"headline": string, "bullets": string[], "focus_next": string, "spoken": string}
+- headline: under 12 words, "so far today" framing.
+- bullets: 3 to 5, each one sentence under 22 words: the trend across sets (cleaner or sloppier), when fatigue starts (first cheat rep in the longer sets), which arm's shoulder cheats, the best set, and any logged lifts (sets x reps x load only, they were not sensed: never describe their muscles).
+- focus_next: the FOCUS above in your own words, one sentence, for the rest of the session.
+- spoken: at most ${WORKOUT_SPOKEN_MAX_WORDS} words, said out loud: where the workout stands plus the focus.
+No raw shoulder/delt percentages, no previous sessions, never a weight change. Only JSON.`;
+  try {
+    const obj = parseJsonObject(await getBrain()(SYSTEM_PROMPT, prompt, { json: true }));
+    if (!obj) return fallback;
+    const str = (v: unknown) => (typeof v === "string" ? clean(v) : "");
+    const headline = str(obj.headline);
+    const bullets = Array.isArray(obj.bullets) ? obj.bullets.map(str).filter(Boolean).slice(0, 5) : [];
+    const focus_next = str(obj.focus_next);
+    let spoken = str(obj.spoken);
+    // Over 20 words: trimming would drop the focus, so use the code line (status + focus, <= 20 words).
+    if (words(spoken) > WORKOUT_SPOKEN_MAX_WORDS) spoken = fallback.spoken;
+    const all = [headline, ...bullets, focus_next, spoken].join(" ");
+    const knownLoads = [...w.exercises.map((e) => e.load_lb), ...w.logged.map((l) => l.load_lb)].filter((x): x is number => x != null);
+    if (!headline || bullets.length < 3 || !focus_next || breaksRules(all, { historyAllowed: false, knownLoads })) return fallback;
+    return { headline, bullets, focus_next, spoken: spoken || fallback.spoken, totals: w.totals, source: "gemini" };
+  } catch {
+    return fallback;
   }
 }
