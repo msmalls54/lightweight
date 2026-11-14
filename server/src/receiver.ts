@@ -29,7 +29,8 @@ export function addGuard(app: Hono<any, any, any>, publicOrigin?: () => string |
     if (!widgetAsset && !originAllowed(c.req.header("Origin"), publicOrigin?.())) return c.json({ error: "Origin not allowed." }, 403);
     return next();
   });
-  const deviceBody = bodyLimit({ maxSize: 32 * 1024, onError: c => c.json({ error: "Body too large" }, 413) });
+  // Coalesced POSTs: up to ~400 samples x 4 channels (several 40-sample batches); 2000 x 4 worst case.
+  const deviceBody = bodyLimit({ maxSize: 160 * 1024, onError: c => c.json({ error: "Body too large" }, 413) });
   const localBody = bodyLimit({ maxSize: 256 * 1024, onError: c => c.json({ error: "Body too large" }, 413) });
   // The mcp-use inspector posts the inline widget bundle (~2.5 MB) to its local preview store.
   const widgetBody = bodyLimit({ maxSize: 4 * 1024 * 1024, onError: c => c.json({ error: "Widget preview too large" }, 413) });
