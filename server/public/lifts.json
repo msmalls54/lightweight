@@ -1,0 +1,139 @@
+{
+  "_note": "Lift library: one engine, one rule. A lift = which channels are the target, which are the cheat check, and thresholds. Only the curl is validated with real data today; every other entry is a config that has not been tested on a person yet.",
+  "rule": "Cheat = the cheat-check muscle's share of the lifting (up) phase rises well above YOUR clean reps (x1.35 and +0.15 by default).",
+  "groups": ["Arms", "Shoulders", "Chest", "Back", "Legs", "Core"],
+  "lifts": [
+    { "id": "curl", "name": "Dumbbell or band curl", "group": "Arms", "status": "live",
+      "target": [{ "m": "biceps", "v": "front" }], "cheat": [{ "m": "front-deltoids", "v": "front" }],
+      "catches": "Swinging the weight up: a lean-back and the front delt starting the rep.",
+      "sensors": [
+        { "label": "R biceps", "m": "biceps", "v": "front", "side": "right", "where": "Middle of the biceps belly, pads in line with the arm." },
+        { "label": "R front delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Two finger-widths below the bony shoulder tip, pointing down the arm." },
+        { "label": "L biceps", "m": "biceps", "v": "front", "side": "left", "where": "Same as right." },
+        { "label": "L front delt", "m": "front-deltoids", "v": "front", "side": "left", "where": "Same as right." }
+      ],
+      "config": { "variant": "standing", "target": ["R_BI", "L_BI"], "cheat_check": ["R_DELT", "L_DELT"], "thresholds": { "up_ratio_x": 1.35, "up_ratio_plus": 0.15 } } },
+    { "id": "hammer", "name": "Hammer curl", "group": "Arms", "status": "config",
+      "target": [{ "m": "biceps", "v": "front" }], "cheat": [{ "m": "front-deltoids", "v": "front" }],
+      "catches": "Same swing as the curl. The forearm works hard here but isn't sensed, so it reads as less biceps.",
+      "sensors": [
+        { "label": "R biceps", "m": "biceps", "v": "front", "side": "right", "where": "Biceps belly." },
+        { "label": "R front delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Below the shoulder tip." },
+        { "label": "L biceps", "m": "biceps", "v": "front", "side": "left", "where": "Biceps belly." },
+        { "label": "L front delt", "m": "front-deltoids", "v": "front", "side": "left", "where": "Below the shoulder tip." }
+      ],
+      "config": { "variant": "hammer", "target": ["R_BI", "L_BI"], "cheat_check": ["R_DELT", "L_DELT"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "preacher", "name": "Preacher curl", "group": "Arms", "status": "config",
+      "target": [{ "m": "biceps", "v": "front" }], "cheat": [{ "m": "front-deltoids", "v": "front" }],
+      "catches": "Elbows lifting off the pad and the shoulders rolling forward to finish the rep.",
+      "sensors": [
+        { "label": "R biceps", "m": "biceps", "v": "front", "side": "right", "where": "Biceps belly." },
+        { "label": "R front delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Below the shoulder tip." },
+        { "label": "L biceps", "m": "biceps", "v": "front", "side": "left", "where": "Biceps belly." },
+        { "label": "L front delt", "m": "front-deltoids", "v": "front", "side": "left", "where": "Below the shoulder tip." }
+      ],
+      "config": { "variant": "preacher", "target": ["R_BI", "L_BI"], "cheat_check": ["R_DELT", "L_DELT"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "pushdown", "name": "Triceps pushdown", "group": "Arms", "status": "config",
+      "target": [{ "m": "triceps", "v": "back" }], "cheat": [{ "m": "front-deltoids", "v": "front" }],
+      "catches": "Rolling the shoulders forward and leaning onto the bar instead of straightening the elbow.",
+      "sensors": [
+        { "label": "R triceps", "m": "triceps", "v": "back", "side": "right", "where": "Long head, back of the upper arm, midway." },
+        { "label": "R front delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Below the shoulder tip." }
+      ],
+      "config": { "target": ["R_TRI"], "cheat_check": ["R_DELT"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "lateral", "name": "Lateral raise", "group": "Shoulders", "status": "config",
+      "target": [{ "m": "front-deltoids", "v": "front" }, { "m": "back-deltoids", "v": "back" }], "cheat": [{ "m": "trapezius", "v": "back" }],
+      "catches": "Shrugging the weight up with the upper traps. (The art has no side-delt shape; the side delt sits between the front and rear delt shown.)",
+      "sensors": [
+        { "label": "R side delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Outside of the shoulder, middle of the delt cap." },
+        { "label": "R upper trap", "m": "trapezius", "v": "back", "side": "right", "where": "Top of the shoulder, halfway between neck and shoulder tip." },
+        { "label": "L side delt", "m": "front-deltoids", "v": "front", "side": "left", "where": "Same as right." },
+        { "label": "L upper trap", "m": "trapezius", "v": "back", "side": "left", "where": "Same as right." }
+      ],
+      "config": { "target": ["R_SIDE_DELT", "L_SIDE_DELT"], "cheat_check": ["R_TRAP", "L_TRAP"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "frontraise", "name": "Front raise", "group": "Shoulders", "status": "config",
+      "target": [{ "m": "front-deltoids", "v": "front" }], "cheat": [{ "m": "lower-back", "v": "back" }],
+      "catches": "Leaning back and swinging the weight up with the hips and lower back.",
+      "sensors": [
+        { "label": "R front delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Below the shoulder tip." },
+        { "label": "R lower back", "m": "lower-back", "v": "back", "side": "right", "where": "Spinal erector, a hand's width above the belt line, beside the spine." }
+      ],
+      "config": { "target": ["R_DELT"], "cheat_check": ["R_LOWBACK"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "ohp", "name": "Overhead press", "group": "Shoulders", "status": "config",
+      "target": [{ "m": "front-deltoids", "v": "front" }, { "m": "triceps", "v": "back" }], "cheat": [{ "m": "lower-back", "v": "back" }],
+      "catches": "Arching the lower back to push the bar up.",
+      "sensors": [
+        { "label": "R front delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Below the shoulder tip." },
+        { "label": "R triceps", "m": "triceps", "v": "back", "side": "right", "where": "Back of the upper arm." },
+        { "label": "R lower back", "m": "lower-back", "v": "back", "side": "right", "where": "Beside the spine, above the belt line." },
+        { "label": "L lower back", "m": "lower-back", "v": "back", "side": "left", "where": "Same, left." }
+      ],
+      "config": { "target": ["R_DELT", "R_TRI"], "cheat_check": ["R_LOWBACK", "L_LOWBACK"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "bench", "name": "Bench press or push-up", "group": "Chest", "status": "config",
+      "target": [{ "m": "chest", "v": "front" }], "cheat": [{ "m": "front-deltoids", "v": "front" }],
+      "catches": "The shoulders taking over: flared elbows, short range, chest doing less.",
+      "sensors": [
+        { "label": "R chest", "m": "chest", "v": "front", "side": "right", "where": "Mid-chest, a few fingers inside the armpit fold." },
+        { "label": "R front delt", "m": "front-deltoids", "v": "front", "side": "right", "where": "Below the shoulder tip (keep it away from the chest pad: cross-talk)." },
+        { "label": "L chest", "m": "chest", "v": "front", "side": "left", "where": "Same as right." },
+        { "label": "L front delt", "m": "front-deltoids", "v": "front", "side": "left", "where": "Same as right." }
+      ],
+      "config": { "target": ["R_PEC", "L_PEC"], "cheat_check": ["R_DELT", "L_DELT"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "row", "name": "Barbell or cable row", "group": "Back", "status": "config",
+      "target": [{ "m": "upper-back", "v": "back" }], "cheat": [{ "m": "biceps", "v": "front" }],
+      "catches": "Pulling with the arms instead of the back.",
+      "sensors": [
+        { "label": "R lat", "m": "upper-back", "v": "back", "side": "right", "where": "Below the armpit on the side of the back." },
+        { "label": "R biceps", "m": "biceps", "v": "front", "side": "right", "where": "Biceps belly." },
+        { "label": "L lat", "m": "upper-back", "v": "back", "side": "left", "where": "Same as right." },
+        { "label": "L biceps", "m": "biceps", "v": "front", "side": "left", "where": "Same as right." }
+      ],
+      "config": { "target": ["R_LAT", "L_LAT"], "cheat_check": ["R_BI", "L_BI"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "pulldown", "name": "Lat pulldown", "group": "Back", "status": "config",
+      "target": [{ "m": "upper-back", "v": "back" }], "cheat": [{ "m": "biceps", "v": "front" }],
+      "catches": "Arm-pulling: the biceps finish the rep instead of the lats.",
+      "sensors": [
+        { "label": "R lat", "m": "upper-back", "v": "back", "side": "right", "where": "Below the armpit." },
+        { "label": "R biceps", "m": "biceps", "v": "front", "side": "right", "where": "Biceps belly." },
+        { "label": "L lat", "m": "upper-back", "v": "back", "side": "left", "where": "Below the armpit." },
+        { "label": "L biceps", "m": "biceps", "v": "front", "side": "left", "where": "Biceps belly." }
+      ],
+      "config": { "target": ["R_LAT", "L_LAT"], "cheat_check": ["R_BI", "L_BI"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "squat", "name": "Squat", "group": "Legs", "status": "config",
+      "target": [{ "m": "quadriceps", "v": "front" }, { "m": "gluteal", "v": "back" }], "cheat": [{ "m": "lower-back", "v": "back" }],
+      "catches": "Folding forward so the lower back takes the load.",
+      "sensors": [
+        { "label": "R quad", "m": "quadriceps", "v": "front", "side": "right", "where": "Front of the thigh, mid-way, slightly outside." },
+        { "label": "R glute", "m": "gluteal", "v": "back", "side": "right", "where": "Upper-outer glute." },
+        { "label": "R lower back", "m": "lower-back", "v": "back", "side": "right", "where": "Beside the spine, above the belt line." },
+        { "label": "L lower back", "m": "lower-back", "v": "back", "side": "left", "where": "Same, left." }
+      ],
+      "config": { "target": ["R_QUAD", "R_GLUTE"], "cheat_check": ["R_LOWBACK", "L_LOWBACK"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "deadlift", "name": "Deadlift", "group": "Legs", "status": "config",
+      "target": [{ "m": "gluteal", "v": "back" }, { "m": "hamstring", "v": "back" }], "cheat": [{ "m": "lower-back", "v": "back" }],
+      "catches": "Rounding the lower back so it lifts instead of the hips.",
+      "sensors": [
+        { "label": "R glute", "m": "gluteal", "v": "back", "side": "right", "where": "Upper-outer glute." },
+        { "label": "R hamstring", "m": "hamstring", "v": "back", "side": "right", "where": "Back of the thigh, mid-way." },
+        { "label": "R lower back", "m": "lower-back", "v": "back", "side": "right", "where": "Beside the spine." },
+        { "label": "L lower back", "m": "lower-back", "v": "back", "side": "left", "where": "Same, left." }
+      ],
+      "config": { "target": ["R_GLUTE", "R_HAM"], "cheat_check": ["R_LOWBACK", "L_LOWBACK"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "calf", "name": "Calf raise", "group": "Legs", "status": "config",
+      "target": [{ "m": "calves", "v": "back" }], "cheat": [{ "m": "quadriceps", "v": "front" }],
+      "catches": "Bouncing out of the bottom with the knees instead of rising on the toes.",
+      "sensors": [
+        { "label": "R calf", "m": "calves", "v": "back", "side": "right", "where": "Inner head of the calf, widest part." },
+        { "label": "R quad", "m": "quadriceps", "v": "front", "side": "right", "where": "Front of the thigh." }
+      ],
+      "config": { "target": ["R_CALF"], "cheat_check": ["R_QUAD"], "thresholds": { "up_ratio_x": 1.35 } } },
+    { "id": "plank", "name": "Plank", "group": "Core", "status": "config",
+      "target": [{ "m": "abs", "v": "front" }], "cheat": [{ "m": "lower-back", "v": "back" }],
+      "catches": "Hips sagging so the lower back holds you up. A hold, not reps: judged over time.",
+      "sensors": [
+        { "label": "R abs", "m": "abs", "v": "front", "side": "right", "where": "Beside the belly button, a few fingers out." },
+        { "label": "R lower back", "m": "lower-back", "v": "back", "side": "right", "where": "Beside the spine." }
+      ],
+      "config": { "mode": "hold", "target": ["R_ABS"], "cheat_check": ["R_LOWBACK"], "thresholds": { "share_rise": 0.15 } } }
+  ]
+}
