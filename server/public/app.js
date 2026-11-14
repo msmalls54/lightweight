@@ -819,7 +819,7 @@
         case "coach":
           if (e.too_short) break;
           if (!selectedSet) $("coach").textContent = e.text || "";
-          // ④: the player starts a 5 s clock; if the server's audio isn't there by then, it speaks the text itself.
+          // ④: the player starts a 7 s clock; if the server's audio isn't there by then, it speaks the text itself (one voice, never both).
           if (e.audio === "pending" && e.text && !silent() && window.LWAudio?.coachText) LWAudio.coachText(e.set_id, e.text);
           loadWorkoutSoon();
           if (e.audio !== "pending") { // older servers: speak now
