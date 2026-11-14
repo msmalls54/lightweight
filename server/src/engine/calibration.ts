@@ -1,6 +1,6 @@
 // Calibration: rest baseline + MVC per channel -> %MVC. Pure functions.
 
-import type { EngineConfig } from "./config.js";
+import { resolveConfig, type EngineConfig } from "./config.js";
 import { ARM_CH, CHANNEL_NAMES, type Arm, type Calibration } from "./types.js";
 
 export function median(xs: number[]): number {
@@ -47,6 +47,37 @@ export function computeCalibration(
   }
   out.ok = out.problems.length === 0;
   return out;
+}
+
+/**
+ * Per-channel MVC from any number of raw windows (each = 4 arrays of samples, like Batch.ch):
+ * the `percentile` of all of a channel's samples pooled together. NaN for a channel with no samples.
+ * Use it to pool a flex hold with the first strict set: a 3 s FLEX hold undershoots what curls reach.
+ */
+export function mvcFromWindows(windows: number[][][], percentile_ = 0.95): number[] {
+  return [0, 1, 2, 3].map((c) => percentile(windows.flatMap((w) => w[c] ?? []), percentile_));
+}
+
+/**
+ * Pure: a copy of `cal` with each channel's MVC raised to the pooled percentile of `windows` where
+ * that is higher (never lowered, rest unchanged). Problems that were about a too-small flex are
+ * re-checked and dropped if the raised MVC fixes them. Apply it with engine.setCalibration();
+ * the engine rescales the clean references it already learned.
+ */
+export function raiseMvc(
+  cal: Calibration,
+  windows: number[][][],
+  opts: { percentile?: number; config?: Partial<EngineConfig> } = {},
+): Calibration {
+  const cfg = resolveConfig(opts.config);
+  const pooled = mvcFromWindows(windows, opts.percentile ?? cfg.mvcPercentile);
+  const mvc = cal.mvc.map((m, i) => (Number.isFinite(pooled[i]) && pooled[i] > m ? Math.round(pooled[i]) : m));
+  const problems = cal.problems.filter((p) => {
+    const i = CHANNEL_NAMES.findIndex((n) => p.startsWith(n));
+    if (i < 0 || !p.includes("flex only reached")) return true;
+    return mvc[i] - cal.rest[i] < cfg.minMvcSpan;
+  });
+  return { rest: [...cal.rest], mvc, ok: problems.length === 0, problems };
 }
 
 /** Effective per-channel rest and span. Unusable channels fall back to the defaults. */

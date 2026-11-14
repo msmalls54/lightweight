@@ -438,3 +438,38 @@ test("endSet keeps a long-enough rep still in progress", () => {
   const end = e.endSet()!;
   assert.equal(end.reps.length, 1);
 });
+
+test("mvcFromWindows pools windows per channel; raiseMvc only raises, is pure, re-checks problems", async () => {
+  const { mvcFromWindows, raiseMvc } = await import("../src/engine/index.js");
+  const flex = hold([9000, 14000, 13000, 9000], 3000, { noise: 0 });
+  const set = hold([14500, 9000, 600, 600], 3000, { noise: 0 });
+  const pooled = mvcFromWindows([flex, set]);
+  assert.deepEqual(pooled, [14500, 14000, 13000, 9000]);
+  assert.ok(Number.isNaN(mvcFromWindows([])[0]));
+
+  const cal = { rest: [570, 495, 560, 520], mvc: [9000, 14000, 1200, 9000], ok: false, problems: ["L biceps (A2): flex only reached 1200 vs rest 560 (needs +1000). Check the pads."] };
+  const frozen = JSON.stringify(cal);
+  const raised = raiseMvc(cal, [set, hold([600, 600, 5000, 600], 1000, { noise: 0 })]);
+  assert.equal(JSON.stringify(cal), frozen, "input untouched");
+  assert.deepEqual(raised.mvc, [14500, 14000, 5000, 9000]); // R bi + L bi up, delts kept (never lowered)
+  assert.deepEqual(raised.rest, cal.rest);
+  assert.deepEqual(raised.problems, []);
+  assert.equal(raised.ok, true);
+});
+
+test("raising the MVC between sets rescales the learned reference (no false cheats after)", () => {
+  // Set 1 with a low biceps MVC (FLEX hold undershoots), then MVC raised, then the same reps again.
+  const e = new Engine();
+  e.setCalibration({ rest: REST, mvc: [9000, 14960, 14960, 14960], ok: true, problems: [] });
+  const a = runSet(e, presets.heavyEccentric(4), { set_id: "a", load_lb: 35 }, { seed: 11 }).end;
+  assert.equal(a.cheats, 0);
+  const s = synth(presets.heavyEccentric(4), { rest: REST, seed: 11 });
+  const cal = e.raiseMvc([s.ch]);
+  assert.ok(cal.mvc[0] > 11000, `R biceps MVC raised to ${cal.mvc[0]}`);
+  const b = runSet(e, [...presets.heavyEccentric(2), ...presets.heavySwingUp(2)], { set_id: "b", load_lb: 35 }, { seed: 12 }).end;
+  assert.deepEqual(b.reps.map((r) => r.cheat), [false, false, true, true]);
+  // the carried-over reference matches what this calibration measures for clean reps
+  const ref = b.reps[0].baseline_up_delt_ratio!;
+  const clean = b.reps[0].up_delt_ratio!;
+  assert.ok(Math.abs(ref - clean) / clean < 0.25, `ref ${ref} vs clean ${clean}`);
+});
