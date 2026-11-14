@@ -78,11 +78,13 @@ function pick(keys: string[], has: (key: string) => boolean): string[] {
   return keys.filter((k) => has(k)).slice(0, CLIP_SUMMARY_MAX);
 }
 
-/** Summary voice: "auto" (Gemini if it's there within 4 s, else clips), "gemini" or "clips". Env LW_SUMMARY_VOICE. */
-export type SummaryVoiceMode = "auto" | "gemini" | "clips";
+/**
+ * Summary voice (env LW_SUMMARY_VOICE): "gemini" (default: Gemini TTS, waited for; the clips only if it
+ * fails) or "clips" (force the stitched clips, e.g. for a demo when Google is down).
+ */
+export type SummaryVoiceMode = "gemini" | "clips";
 export function summaryVoiceMode(): SummaryVoiceMode {
-  const m = String(process.env.LW_SUMMARY_VOICE ?? "auto").trim().toLowerCase();
-  return m === "gemini" || m === "clips" ? m : "auto";
+  return String(process.env.LW_SUMMARY_VOICE ?? "").trim().toLowerCase() === "clips" ? "clips" : "gemini";
 }
 
 /** Spread into the server's `coach` events: `{ ...coachVoiceExtras(e) }` -> { clips, voice_mode }. */

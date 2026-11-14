@@ -194,6 +194,15 @@ export async function getClip(key: string): Promise<Buffer | null> {
   return wav;
 }
 
+/** "[voice] set X: gemini 3.4 s" / "[voice] set X: gemini failed (timeout) -> clips". */
+export function voiceLogLine(b: { set_id?: unknown; tier?: unknown; ms?: unknown; reason?: unknown }): string {
+  const id = String(b.set_id ?? "?").slice(0, 60);
+  const tier = String(b.tier ?? "?").slice(0, 20);
+  const ms = typeof b.ms === "number" && isFinite(b.ms) ? ` ${(b.ms / 1000).toFixed(1)} s` : "";
+  const reason = typeof b.reason === "string" && b.reason ? b.reason.slice(0, 80) : "";
+  return tier === "gemini" ? `[voice] set ${id}: gemini${ms}` : `[voice] set ${id}: ${reason || "backup"} -> ${tier}${ms}`;
+}
+
 /** Clip keys with no cached WAV yet. */
 export function missingClips(cacheDir = state.cacheDir): string[] {
   return Object.keys(CLIPS).filter((k) => {
@@ -304,6 +313,16 @@ export function registerVoiceRoutes(app: Hono<any, any, any>): void {
   app.get("/voice/clips", (c) => c.json({ ...voiceStatus(), keys: Object.keys(CLIPS), texts: CLIPS }));
   // The dashboard polls this; if it changes after the tab loaded, the tab's JS is stale -> "Reload this tab".
   app.get("/voice/build", (c) => c.json({ build: dashboardBuild() }, 200, { "cache-control": "no-store" }));
+  // The speaker tab reports which voice spoke for each set.
+  app.post("/voice/log", async (c) => {
+    try {
+      const b = (await c.req.json()) as { set_id?: unknown; tier?: unknown; ms?: unknown; reason?: unknown };
+      console.log(voiceLogLine(b));
+    } catch {
+      /* ignore */
+    }
+    return c.json({ ok: true });
+  });
 
   app.get("/voice/clip/:file", async (c) => {
     const key = c.req.param("file").replace(/\.wav$/i, "");

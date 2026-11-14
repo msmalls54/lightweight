@@ -36,17 +36,18 @@ test("<= 8 clips, every key is a real clip, missing clips are skipped", () => {
   assert.ok(Array.isArray(missingClips(fs.mkdtempSync(`${process.cwd()}/.cache-test-`))));
 });
 
-test("LW_SUMMARY_VOICE: auto by default; gemini / clips when set; extras for the coach event", () => {
+test("LW_SUMMARY_VOICE: gemini by default; clips when set; extras for the coach event; log line", async () => {
+  const { voiceLogLine } = await import("../src/voice/index.js");
   const old = process.env.LW_SUMMARY_VOICE;
   delete process.env.LW_SUMMARY_VOICE;
-  assert.equal(summaryVoiceMode(), "auto");
-  process.env.LW_SUMMARY_VOICE = "clips";
-  assert.equal(summaryVoiceMode(), "clips");
-  process.env.LW_SUMMARY_VOICE = "GEMINI";
   assert.equal(summaryVoiceMode(), "gemini");
-  process.env.LW_SUMMARY_VOICE = "nonsense";
-  assert.equal(summaryVoiceMode(), "auto");
-  assert.deepEqual(coachVoiceExtras(SET2), { clips: ["late_in_set", "right_shoulder_took_over", "stop_first_cheat_next", "rest_longer"], voice_mode: "auto" });
-  if (old === undefined) delete process.env.LW_SUMMARY_VOICE;
-  else process.env.LW_SUMMARY_VOICE = old;
+  process.env.LW_SUMMARY_VOICE = "CLIPS";
+  assert.equal(summaryVoiceMode(), "clips");
+  process.env.LW_SUMMARY_VOICE = "auto";
+  assert.equal(summaryVoiceMode(), "gemini");
+  delete process.env.LW_SUMMARY_VOICE;
+  assert.deepEqual(coachVoiceExtras(SET2), { clips: ["late_in_set", "right_shoulder_took_over", "stop_first_cheat_next", "rest_longer"], voice_mode: "gemini" });
+  if (old !== undefined) process.env.LW_SUMMARY_VOICE = old;
+  assert.equal(voiceLogLine({ set_id: "set-9", tier: "gemini", ms: 3400 }), "[voice] set set-9: gemini 3.4 s");
+  assert.equal(voiceLogLine({ set_id: "set-9", tier: "clips", ms: 16100, reason: "gemini failed (timeout)" }), "[voice] set set-9: gemini failed (timeout) -> clips 16.1 s");
 });

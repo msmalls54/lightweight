@@ -209,7 +209,7 @@ export class Pipeline {
         this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: true, text, spoken });
       } catch (err) {
         console.error("[voice] summary TTS failed:", errMsg(err));
-        this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
+        this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback, error: /timed out|timeout/i.test(errMsg(err)) ? "timeout" : "error" });
       }
     } catch (err) {
       console.error("[coach] summarizeSet failed:", errMsg(err));

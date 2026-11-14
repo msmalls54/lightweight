@@ -25,6 +25,16 @@
   let STALE = false; // ④: this tab's JS is older than the server's -> never speak (see checkBuild)
   const silent = () => MUTED || QUIET || !isSpeaker || STALE;
   const syncVoice = () => { try { window.LWAudio?.setEnabled?.(!silent()); } catch { /* ignore */ } };
+  // ④ under the coach line: "Coach is thinking…" while the Gemini voice is generated (it's waited for).
+  window.addEventListener("lwaudio", ev => {
+    const d = ev.detail || {}, w = String(d.what || ""), coachEl = document.getElementById("coach");
+    if (!coachEl || !/^(coach:|clips:coach:|browser:coach:)/.test(w)) return;
+    let el = document.getElementById("coachVoice");
+    if (!el) { el = document.createElement("div"); el.id = "coachVoice"; el.style.cssText = "font-size:12px;opacity:.7;margin-top:2px"; coachEl.insertAdjacentElement("afterend", el); }
+    if (d.type === "voice_wait") el.textContent = "Coach is thinking…";
+    else if (d.type === "fallback") el.textContent = "Gemini voice unavailable: backup voice";
+    else if (d.type === "start" || d.type === "end" || d.type === "skip_late") el.textContent = "";
+  });
   function speakFallback(text) {
     if (silent() || !("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
