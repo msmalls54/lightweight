@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { relabelSnitch, type LiftKey } from "./facts.js";
 import type { SetEndEvent } from "./types.js";
 
 /** data/coach at the repo root. Override with env LW_COACH_DIR (tests use a temp dir). */
@@ -18,7 +19,14 @@ export interface CoachContext {
   profile: unknown;
   plan: unknown;
   lastDay: unknown;
-  today: { sets: SetEndEvent[]; checkin?: Checkin; date?: string; planned?: unknown };
+  today: {
+    sets: SetEndEvent[];
+    checkin?: Checkin;
+    date?: string;
+    planned?: unknown;
+    /** set_id -> exercise/variant/load (server SetContext). History is only compared like-for-like. */
+    setMeta?: Record<string, LiftKey>;
+  };
   person: string;
   isWalkUp: boolean;
 }
@@ -109,6 +117,8 @@ export function buildCoachContext(input: {
   todaySets: SetEndEvent[];
   checkin?: Checkin;
   dataDir?: string;
+  /** set_id -> {exercise, variant, load_lb}, e.g. store.todaySetMeta(person). Without it, no history comparisons. */
+  setMeta?: Record<string, LiftKey>;
 }): CoachContext {
   const dir = input.dataDir ?? coachDir();
   const date = localDate();
@@ -122,7 +132,7 @@ export function buildCoachContext(input: {
       profile: walkUpProfile(person),
       plan: WALKUP_PLAN,
       lastDay: null,
-      today: { date, sets, ...(input.checkin ? { checkin: input.checkin } : {}) },
+      today: { date, sets, ...(input.checkin ? { checkin: input.checkin } : {}), ...(input.setMeta ? { setMeta: input.setMeta } : {}) },
       person,
       isWalkUp: true,
     };
@@ -131,14 +141,16 @@ export function buildCoachContext(input: {
   const plan = stripTodos(readJson(path.join(dir, "plan.json"))) as Record<string, unknown> | null;
   const planToday = plan?.today as { date?: string } | undefined;
   return {
-    profile: stripTodos(rawProfile) ?? { name: person },
-    plan: plan ? { ...plan, today: undefined } : null,
-    lastDay: newestHistory(dir, date),
+    // Mike's call: plain words, so any "snitch" in the files becomes "front delt" before the LLM sees it.
+    profile: relabelSnitch(stripTodos(rawProfile) ?? { name: person }),
+    plan: plan ? relabelSnitch({ ...plan, today: undefined }) : null,
+    lastDay: relabelSnitch(newestHistory(dir, date)),
     today: {
       date,
       planned: planToday && (!planToday.date || planToday.date === date) ? planToday : undefined,
       sets,
       ...(input.checkin ? { checkin: input.checkin } : {}),
+      ...(input.setMeta ? { setMeta: input.setMeta } : {}),
     },
     person,
     isWalkUp: false,

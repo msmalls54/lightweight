@@ -48,28 +48,29 @@ test("real set 2: fatigue pattern from rep 6", () => {
   assert.deepEqual(f.cheat_reps, [6, 7, 8, 9, 10]);
   assert.match(f.cheat_pattern, /^fatigue/);
   assert.deepEqual(f.tempo.fast_up_reps, [1, 4, 7]);
-  assert.match(fallbackSummary(SET2), /^From rep 6 on, your right shoulder took over, 8 to 12 times harder/);
+  assert.match(fallbackSummary(SET2), /^From rep 6 on, your right shoulder took over, 8 to 12 times its normal share on the way up\./);
 });
 
 test("fallback spoken line names every cheat rep and the why", () => {
   assert.equal(
     fallbackSummary(SET1),
-    "Reps 4 and 8: your right shoulder fired 9 and 7 times harder than your clean reps, that's a swing. Rep 5 was a smaller cheat at 2 times. Next set, stop at the first cheat and rest longer, same weight.",
+    "Reps 4 and 8: your right shoulder did 9 and 7 times its normal share on the way up, that's a swing. Rep 5 was a smaller cheat at 2 times normal. Next set, stop at the first cheat and rest longer, same weight.",
   );
 });
 
-test("fallback detail card covers cheats, near-miss, tempo, L/R, last time, cue", () => {
-  const d = fallbackDetail(SET1, ctx().lastDay);
+test("fallback detail card covers reference, cheats, near-miss, tempo, L/R, cue; no unlike history", () => {
+  const d = fallbackDetail(SET1, ctx().lastDay, { lift: { exercise: "dumbbell curl", variant: "standing", load_lb: 35 } });
   assert.equal(d.source, "code");
   assert.equal(d.headline, "3 cheats in 10 reps, first at rep 4");
   assert.ok(d.bullets.length >= 4 && d.bullets.length <= 6, String(d.bullets.length));
   const all = d.bullets.join("\n");
-  assert.match(all, /Reps 4 and 8: right front delt worked 9 and 7x/);
-  assert.match(all, /Rep 5: smaller cheat \(2.2x clean\); right biceps peaked at 46%/);
+  assert.match(all, /Reps 1 and 2 set your clean reference/);
+  assert.match(all, /Reps 4 and 8: right shoulder did 9 and 7x its normal share/);
+  assert.match(all, /Rep 5: smaller cheat \(2.2x its normal share\); right biceps peaked at 46% of max/);
   assert.match(all, /Rep 9: near-miss/);
   assert.match(all, /nothing rushed/);
   assert.match(all, /right biceps did 41%/);
-  assert.match(all, /Vs 2026-11-13: strict 10%/);
+  assert.doesNotMatch(all, /2026-11-13|delt share/); // Nov 13 was band curls: not like-for-like
   assert.ok(d.cue.length > 10);
   assert.equal(d.decision.next, "stop_at_first_cheat_rest_longer");
 });
@@ -148,7 +149,8 @@ test("answer() gets the same rich facts for every set today", async () => {
   assert.match(seen, /"set_no":1/);
   assert.match(seen, /"set_no":2/);
   assert.match(seen, /"up_delt_x_clean":12\.2/);
-  assert.match(seen, /"balance":\{"avg_r_share":0\.41/);
+  assert.match(seen, /"right_biceps_share_pct":41/);
+  assert.doesNotMatch(seen, /delt_share|"delt_peak/);
   setBrain(undefined);
 });
 
