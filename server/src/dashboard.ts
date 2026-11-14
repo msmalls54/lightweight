@@ -71,6 +71,11 @@ export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store
   }));
   app.post("/set/stop", wrap(() => { pipeline.stopSet(); return {}; }));
   app.post("/set/countdown", wrap(async c => { const b = await body(c, setStartSchema); return pipeline.startCountdown(b); }));
+  app.post("/quiet", wrap(async c => {
+    const b = (await c.req.json().catch(() => ({}))) as { on?: unknown };
+    if (typeof b.on !== "boolean") throw new HttpError(400, "body must be {on: boolean}");
+    return pipeline.setQuiet(b.on);
+  }));
   app.post("/set/cancel", wrap(() => ({ cancelled: pipeline.cancelCountdown() })));
 
   app.post("/calibrate/begin", wrap(() => pipeline.calBegin()));

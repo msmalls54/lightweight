@@ -131,6 +131,11 @@ export class Store {
         WHERE s.person=? AND s.kind='live' AND s.is_walkup=0 AND t.summary IS NOT NULL AND t.started_at>=? ORDER BY t.started_at`)
       .all(person, midnight.toISOString()) as { summary: string }[]).map(r => JSON.parse(r.summary) as SetEndEvent);
   }
+  /** set_id -> exercise/variant/load for one session's sets (fake/replay/walk-up sessions too). */
+  sessionSetMeta(sessionId: string): Record<string, SetMeta> {
+    const rows = this.db.prepare("SELECT set_id, ctx FROM sets WHERE session_id=?").all(sessionId) as { set_id: string; ctx: string }[];
+    return Object.fromEntries(rows.map(r => { const c = JSON.parse(r.ctx) as SetContext; return [r.set_id, { exercise: c.exercise, variant: c.variant, load_lb: c.load_lb }]; }));
+  }
   /** set_id -> exercise/variant/load for today's live sets (writeTodayHistory's setMeta). */
   todaySetMeta(person: string): Record<string, SetMeta> {
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);

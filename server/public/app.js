@@ -19,7 +19,10 @@
   // Only ONE dashboard speaks: the server picks the speaker (oldest non-muted tab; click the pill to
   // take over). Every other tab shows text only and never calls /voice/say.
   let isSpeaker = false, clientId = null;
-  const silent = () => MUTED || !isSpeaker;
+  // Quiet mode: no audio at all on any dashboard (server-wide flag, also kept in localStorage).
+  let QUIET = false;
+  try { QUIET = localStorage.getItem("lw.quiet") === "1"; } catch { /* storage blocked */ }
+  const silent = () => MUTED || QUIET || !isSpeaker;
   function speakFallback(text) {
     if (silent() || !("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
@@ -299,8 +302,15 @@
     const lop = (a, b) => Math.max(a, b) / Math.max(1, Math.min(a, b)) > 1.5 ? " (uneven)" : "";
     return ` · MVC biceps R ${k(mvc[0])} / L ${k(mvc[2])}${lop(mvc[0], mvc[2])} · delt R ${k(mvc[1])} / L ${k(mvc[3])}${lop(mvc[1], mvc[3])}`;
   }
+  let quietSynced = false;
   function onStatus(s) {
     lastStatus = s;
+    if (!quietSynced) { // first status: a remembered Quiet mode survives server restarts
+      quietSynced = true;
+      if (QUIET && !s.quiet) post("/quiet", { on: true }).catch(() => {});
+      else if (!!s.quiet !== QUIET) applyQuiet(s.quiet);
+    } else if (!!s.quiet !== QUIET) applyQuiet(s.quiet);
+    $("btnStop").classList.toggle("hidden", !(s.set || s.countdown_ms_left != null));
     if (firstStatus) {
       firstStatus = false;
       const ss0 = s.session;
@@ -332,7 +342,7 @@
       $("armState").className = armed ? "armed" : "idle";
       $("armState").textContent = armed ? (s.set.set_no ? `Set ${s.set.set_no} running` : "Armed · curl to start") : ss?.calibrating ? "Calibrating" : "Idle";
     }
-    $("heroStart").classList.toggle("show", !armed && s.countdown_ms_left == null && !ss?.calibrating && s.mode === "live" && !loopTimer);
+
     if (s.set) {
       $("setmeta").textContent = `${s.set.exercise} · ${s.set.variant}${s.set.load_lb != null ? ` · ${s.set.load_lb} lb` : ""} · ${s.set.arms.join(" + ")}`;
     } else $("setmeta").textContent = ss?.calibrating ? "Calibrating…" : "Pick up the weights after the countdown.";
@@ -419,13 +429,14 @@
   }
   function scheduleNext() {
     clearTimeout(waitTimer); waitTimer = null;
-    if (!$("handsFree").checked || !controller()) return;
+    if (!$("handsFree").checked || !controller() || QUIET) return;
     loopEndsAt = Date.now() + 20_000;
     clearInterval(loopTimer);
     loopTimer = setInterval(() => {
       const left = loopEndsAt - Date.now();
       $("armState").className = "idle";
       $("armState").textContent = `Next set in ${Math.max(0, Math.ceil(left / 1000))} s · any key cancels`;
+      if (QUIET) { cancelLoop(); return; }
       if (left <= 0) { cancelLoop(); startSet(); }
     }, 250);
   }
@@ -444,6 +455,106 @@
   }
   for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, () => { cancelLoop(); }, true);
 
+  // ------------------------------------------------------------ quiet mode
+  function applyQuiet(on) {
+    QUIET = !!on;
+    try { localStorage.setItem("lw.quiet", QUIET ? "1" : "0"); } catch { /* ignore */ }
+    $("quietBtn").classList.toggle("on", QUIET);
+    $("quietBtn").title = QUIET ? "Quiet mode is on: no audio on any dashboard (Q to turn off)" : "Quiet mode: no audio on any dashboard (Q)";
+    if (QUIET) {
+      cancelLoop();
+      try { speechSynthesis.cancel(); } catch { /* ignore */ }
+      try { if (lead?.audio) lead.audio.pause(); } catch { /* ignore */ }
+      clearTimeout(cdVoiceTimer);
+    }
+    setTimeout(voiceTick, 0); // after the script has initialised the voice state
+  }
+  async function setQuiet(on) {
+    applyQuiet(on);
+    try { await post("/quiet", { on: QUIET }); } catch (e) { toast(`Quiet mode: ${e.message}`); }
+  }
+  $("quietBtn").onclick = () => setQuiet(!QUIET);
+  applyQuiet(QUIET);
+
+  // ------------------------------------------------------------ voice commands (speaker tab)
+  // Hardcoded phrases only. The matcher is pure so it can be tested without a mic (window.LWVoiceCmd.match).
+  function normalizeSpeech(t) {
+    return String(t || "").toLowerCase().replace(/[^a-z' ]+/g, " ").replace(/\s+/g, " ").trim()
+      .replace(/^(okay|ok|hey|um|uh|and|so|please) /, "").replace(/ (please|now)$/, "");
+  }
+  function matchCommand(t) {
+    const n = normalizeSpeech(t);
+    if (!n) return null;
+    if (/^(start|starts|started|starting)( a| the| my| next| another)? new session$/.test(n) || /^new session$/.test(n)) return "new_session";
+    if (/^(start|starts|started|starting)( the| a| my| next| another)?( set)?$/.test(n) || /^(go|let's go|lets go)$/.test(n)) return "start";
+    if (/^(stop|stops|stopped|stopping)( the| my| this)?( set)?$/.test(n) || /^(done|i'm done|im done|set done|i am done)$/.test(n)) return "stop";
+    return null;
+  }
+  window.LWVoiceCmd = { match: matchCommand, normalize: normalizeSpeech };
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, recRunning = false, recBlocked = SR ? null : "unavailable", recRetryAt = 0, busyUntil = 0, heardUntil = 0, lastCmdAt = 0;
+  function audioBusy() {
+    return !!(window.LWAudio?.isSpeaking?.() || (lead?.audio && !lead.audio.paused)); // coach clip/say, or the countdown voice
+  }
+  function renderMic(text, cls) {
+    $("micWrap").classList.toggle("hidden", MUTED || !isSpeaker);
+    $("mic").className = cls || "";
+    $("mic").textContent = text;
+    $("btnStart").closest("footer").classList.toggle("voice", cls === "listening" || cls === "heard");
+  }
+  function onVoiceCommand(cmd, heard) {
+    if (Date.now() - lastCmdAt < 1500) return;
+    lastCmdAt = Date.now();
+    heardUntil = Date.now() + 2000;
+    renderMic(`Heard "${heard}"`, "heard");
+    cancelLoop();
+    const st = lastStatus;
+    if (cmd === "start") {
+      if (st?.countdown_ms_left != null || st?.set?.set_no) return; // already counting down / mid-set
+      startSet();
+    } else if (cmd === "stop") stopSet();
+    else if (cmd === "new_session") run(() => post("/session/start", { person: "Mike", walkup: false, arms: arms() }))();
+  }
+  function ensureRec() {
+    if (rec || !SR) return rec;
+    rec = new SR();
+    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
+    rec.onstart = () => { recRunning = true; voiceTick(); };
+    rec.onend = () => { recRunning = false; voiceTick(); }; // Chrome stops after silence: voiceTick restarts it
+    rec.onerror = e => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") recBlocked = "blocked";
+      else if (e.error === "network" || e.error === "audio-capture") recRetryAt = Date.now() + 5000;
+    };
+    rec.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (!r.isFinal) continue;
+        const text = r[0].transcript.trim();
+        const cmd = matchCommand(text);
+        if (cmd) onVoiceCommand(cmd, normalizeSpeech(text));
+      }
+    };
+    return rec;
+  }
+  function voiceTick() {
+    if (MUTED || !isSpeaker) { if (recRunning) try { rec.abort(); } catch { /* ignore */ } renderMic("", ""); return; }
+    if (recBlocked === "unavailable") return renderMic("Voice commands unavailable · use Space / X", "");
+    if (recBlocked === "blocked") return renderMic("Mic blocked · use Space / X", "");
+    if (QUIET) { if (recRunning) try { rec.abort(); } catch { /* ignore */ } return renderMic("Voice commands paused (quiet)", ""); }
+    const busy = audioBusy() || calRunning;
+    if (busy) busyUntil = Date.now() + 700; // resume a moment after the coach stops talking
+    const want = Date.now() >= busyUntil && Date.now() >= recRetryAt;
+    if (!want) {
+      if (recRunning) try { rec.abort(); } catch { /* ignore */ }
+      if (Date.now() >= heardUntil) renderMic("Paused while the coach talks", "");
+      return;
+    }
+    if (!recRunning) { try { ensureRec().start(); } catch { /* already starting */ } }
+    if (Date.now() >= heardUntil) renderMic('Listening · say "start set"', "listening");
+  }
+  setInterval(voiceTick, 300);
+
   // ------------------------------------------------------------ SSE
   let es;
   function connect() {
@@ -456,7 +567,8 @@
         case "live": live = e.pct; liveAt = performance.now(); break;
         case "status": onStatus(e); break;
         case "hello": clientId = e.client_id; break;
-        case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); break;
+        case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;
+        case "quiet": applyQuiet(e.on); break;
         case "history":
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet();
           if (staleId) { renderIdle(); break; } // old fake/replay/stale run: don't show its reps
@@ -618,6 +730,7 @@
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (k === " " || k === "spacebar") e.preventDefault();
+    if (k === "q") { setQuiet(!QUIET); return; }
     if (k === "c") calibrate(); else if (k === "s" || k === " " || k === "spacebar") startSet(); else if (k === "x") stopSet();
   });
 
@@ -647,6 +760,7 @@
     if (!playlist.length) return;
     track = (i + playlist.length) % playlist.length;
     audio.src = playlist[track].url;
+    $("nowPlaying").innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12V3.5l7-1.5V10.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="11.5" cy="10.5" r="1.5"/></svg>${esc(playlist[track].name.replace(/\.[a-z0-9]+$/i, ""))}`;
     audio.play().catch(() => {});
   }
   $("musicFiles").onchange = e => {

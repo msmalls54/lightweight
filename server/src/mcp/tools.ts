@@ -123,7 +123,7 @@ export function registerTools(server: MCPServer, store: Store, pipeline: Pipelin
   }, async a => {
     try {
       const person = a.person ?? pipeline.sessionPerson;
-      return object(buildCoachContext({ person, todaySets: store.todaySetEnds(person) }) as unknown as Record<string, unknown>);
+      return object(buildCoachContext({ person, todaySets: store.todaySetEnds(person), setMeta: store.todaySetMeta(person) }) as unknown as Record<string, unknown>);
     } catch (e) { return fail(e); }
   });
 
