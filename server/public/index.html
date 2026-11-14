@@ -4,224 +4,284 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lightweight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
+  /* ---------------------------------------------------------------- tokens */
   :root {
-    --bg: #0b0d12; --panel: #151922; --panel2: #1c212c; --line: #2a3140; --text: #f2f4f8; --dim: #8a93a6;
-    --red: #ff3b3b; --green: #2fd67b; --amber: #ffb020; --blue: #4aa3ff; --bi: #4aa3ff; --delt: #ff8a3d;
+    --bg: #0B0D10; --surface: #14171C; --line: #1F242B;
+    --text: #E8EAED; --muted: #8A9099;
+    --accent: #4C8DFF;                                      /* the one interactive color */
+    --ok: #22C55E; --warn: #F59E0B; --bad: #EF4444;         /* verdicts only */
+    --fs-s: clamp(13px, 1.3vh, 15px); --fs-m: clamp(15px, 1.6vh, 18px); --fs-l: clamp(20px, 2.2vh, 26px); /* 3 sizes */
+    --fs-hero: clamp(34px, 6.2vh, 60px);                    /* + one hero size */
+    --r: 14px; --s1: 8px; --s2: 16px; --s3: 24px;           /* radius, 8 px grid */
+    --ease: 160ms ease;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
-  /* One screen, no page scroll: header / banner / panels (shrink to fit) / controls. */
-  body { height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
-  button, input, select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
-  button { cursor: pointer; font-weight: 600; }
-  button:hover { border-color: var(--dim); }
-  button.primary { background: #23406a; border-color: var(--blue); }
-  button.danger { background: #4a1c1c; border-color: var(--red); }
-  button:disabled { opacity: .45; cursor: default; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: var(--fs-m); font-weight: 400;
+    -webkit-font-smoothing: antialiased; }
+  .num, #setline, .meter .verdict, .meter .mx, #feed .x, .raw .val, #devText, #hbText, #mode { font-variant-numeric: tabular-nums; }
+  b, strong { font-weight: 600; }
 
-  header { display: flex; align-items: center; gap: 12px 18px; padding: 10px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  .brand { font-size: clamp(22px, 2.2vw, 30px); font-weight: 800; letter-spacing: .08em; }
-  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: clamp(14px, 1.2vw, 18px); white-space: nowrap; }
-  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--dim); }
-  .dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); }
-  .dot.warn { background: var(--amber); }
-  .dot.off { background: var(--red); }
-  .mode { font-weight: 800; letter-spacing: .1em; }
-  .mode.replay { background: #3b2a00; border-color: var(--amber); color: var(--amber); }
+  /* One screen: header / banner / hero / secondary (shrinks) / toolbar. */
+  body { height: 100vh; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; overflow: hidden; }
+
+  /* ---------------------------------------------------------------- controls */
+  button, input, select { font: inherit; font-size: var(--fs-s); color: var(--text); background: transparent; border: 1px solid var(--line);
+    border-radius: 10px; padding: 7px 12px; transition: border-color var(--ease), background var(--ease), color var(--ease); }
+  button { cursor: pointer; font-weight: 600; color: var(--text); }
+  button:hover { border-color: #2C333C; background: #181C22; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: #3F7FF0; }
+  button.danger, button.quiet { color: var(--muted); }
+  button:disabled { opacity: .4; cursor: default; }
+  select option { background: var(--surface); }
+  label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: var(--fs-s); }
+  input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+  kbd { font: inherit; font-size: 11px; font-weight: 600; padding: 1px 6px; margin-left: 6px; border-radius: 5px; border: 1px solid rgba(255,255,255,.25); color: inherit; opacity: .8; }
+
+  /* ---------------------------------------------------------------- header: logo · one quiet status line */
+  header { display: flex; align-items: center; gap: var(--s2); padding: 12px var(--s3); border-bottom: 1px solid var(--line); min-width: 0; }
+  .brand { font-size: var(--fs-l); font-weight: 600; letter-spacing: -.01em; }
+  .status { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: var(--fs-s); min-width: 0; white-space: nowrap; overflow: hidden; }
+  .status > * { display: inline-flex; align-items: center; gap: 6px; }
+  .status .sep { width: 3px; height: 3px; border-radius: 50%; background: #3A414B; }
+  #mode { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  #mode.replay { color: var(--warn); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #3A414B; flex: none; }
+  .dot.on { background: var(--ok); }
+  .dot.off { background: var(--bad); }
+  #sseWrap.ok { display: none; }                         /* only shown when the link drops */
+  #spk { cursor: pointer; border-radius: 8px; padding: 2px 6px; }
+  #spk:hover { color: var(--text); }
+  #spk.on { color: var(--text); }
+  #spk svg { width: 15px; height: 15px; }
   .grow { flex: 1; }
-  .pill.speaker { cursor: pointer; }
-  .pill.speaker.on { border-color: var(--green); color: var(--green); }
-  .who { font-size: 22px; font-weight: 700; }
-  .who small { color: var(--dim); font-weight: 400; font-size: 16px; }
+  #who { font-size: var(--fs-m); font-weight: 600; text-align: right; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #who small { font-size: var(--fs-s); font-weight: 400; color: var(--muted); margin-left: 6px; }
 
-  #banner { height: 0; overflow: hidden; transition: height .15s; background: var(--red); color: #fff; text-align: center; font-weight: 900; letter-spacing: .04em; }
-  #banner.show { height: clamp(64px, 10vh, 96px); }
-  #banner span { display: block; font-size: clamp(26px, min(6vh, 3.3vw), 64px); line-height: clamp(64px, 10vh, 96px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* ---------------------------------------------------------------- cheat banner */
+  #banner { height: 0; overflow: hidden; transition: height var(--ease); }
+  #banner.show { height: 56px; }
+  #banner span { display: flex; align-items: center; gap: 12px; height: 56px; margin: 0 var(--s3); padding: 0 var(--s2);
+    font-size: var(--fs-l); font-weight: 600; color: var(--text); border-left: 4px solid var(--bad); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  main { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; padding: 14px 20px; min-height: 0; overflow: hidden; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
-  .card h2 { flex: none; margin: 0 0 8px; font-size: 16px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); font-weight: 700; }
+  /* ---------------------------------------------------------------- cards */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: var(--s2) 20px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .label { flex: none; margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+
+  /* ---------------------------------------------------------------- hero: set status + per-arm cheat meters */
+  #hero { margin: var(--s2) var(--s3) 0; display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 2fr); gap: var(--s3); align-items: stretch; }
+  #heroStatus { display: flex; flex-direction: column; justify-content: center; gap: var(--s1); min-width: 0; }
+  #armState { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-s); font-weight: 600; color: var(--muted); }
+  #armState::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #3A414B; }
+  #armState.armed { color: var(--text); }
+  #armState.armed::before { background: var(--accent); }
+  #setline { font-size: var(--fs-hero); font-weight: 600; line-height: 1.05; letter-spacing: -.02em; }
+  #setline .counts { display: block; margin-top: 6px; font-size: var(--fs-m); font-weight: 400; letter-spacing: 0; color: var(--muted); }
+  #setline .counts b { font-weight: 600; color: var(--text); }
+  #setmeta { font-size: var(--fs-s); color: var(--muted); }
+  #heroStart { align-self: flex-start; margin-top: 4px; display: none; }
+  #heroStart.show { display: inline-flex; align-items: center; }
+
+  #meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); min-width: 0; }
+  .meter { display: grid; grid-template-rows: auto auto auto auto; gap: 10px; padding: var(--s2) 20px; border-radius: 12px; border: 1px solid var(--line); min-width: 0; transition: opacity var(--ease); }
+  .meter.off { opacity: .35; }
+  .meter .m-top { display: flex; justify-content: space-between; align-items: baseline; color: var(--muted); font-size: var(--fs-s); }
+  .meter .side { font-weight: 600; color: var(--text); }
+  .meter .verdict { font-size: var(--fs-hero); font-weight: 600; line-height: 1; letter-spacing: -.02em; color: var(--muted); transition: color var(--ease); }
+  .meter .verdict .mx { font-size: var(--fs-l); font-weight: 400; color: var(--muted); margin-left: 12px; letter-spacing: 0; }
+  .meter.clean .verdict { color: var(--ok); } .meter.loose .verdict { color: var(--warn); } .meter.cheat .verdict { color: var(--bad); }
+  .meter .gauge { position: relative; height: 12px; border-radius: 6px; overflow: hidden; display: flex; background: #1B1F25; }
+  .meter .gauge .z { height: 100%; }
+  .meter .gauge .zg { width: 60%; background: rgba(34, 197, 94, .28); }    /* 0 - 1.2x */
+  .meter .gauge .za { width: 7.5%; background: rgba(245, 158, 11, .35); }  /* 1.2 - 1.35x */
+  .meter .gauge .zr { flex: 1; background: rgba(239, 68, 68, .30); }       /* >= 1.35x, scale ends at 2x */
+  .meter .gauge .mk { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; background: var(--text); border-radius: 2px; transition: left 200ms ease; }
+  .meter .gauge .mv { display: none; }
+  .meter .gauge .learn { position: absolute; inset: 0; }
+  .meter .m-foot { display: flex; justify-content: space-between; gap: var(--s1); font-size: var(--fs-s); color: var(--muted); min-width: 0; }
+  .meter .msub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meter .scale { display: flex; gap: 10px; flex: none; }
+
+  /* ---------------------------------------------------------------- secondary row */
+  main { display: grid; grid-template-columns: minmax(0, .75fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--s2); padding: var(--s2) var(--s3); min-height: 0; overflow: hidden; }
 
   #map { flex: 1 1 0; min-height: 0; display: flex; }
   #map svg { display: block; width: 100%; height: 100%; }
-  .maplegend { flex: none; display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; color: var(--dim); font-size: 15px; margin-top: 6px; }
+  .maplegend { flex: none; display: flex; justify-content: center; color: var(--muted); font-size: var(--fs-s); margin: 8px 0 12px; }
+  #bars { flex: none; display: grid; gap: 6px; }
+  .raw { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) 3.2em; align-items: center; gap: 10px; font-size: var(--fs-s); color: var(--muted); transition: opacity var(--ease); }
+  .raw .track { position: relative; height: 6px; border-radius: 3px; background: #1B1F25; overflow: hidden; }
+  .raw .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; background: #4A525E; transition: width 60ms linear; }
+  .raw.delt .fill { background: #6B7380; }
+  .raw.hot .fill { background: var(--bad); }
+  .raw .mvc { position: absolute; top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,.35); }
+  .raw .val { text-align: right; color: var(--text); }
+  .raw.stale .fill { opacity: .4; }
+  @keyframes pulseRed { from { fill: #EF4444; } }   /* fades back to the live shade */
+  @keyframes pulseGreen { from { fill: #22C55E; } }
+  #map polygon.pulse-red { animation: pulseRed 1.2s ease-out; }
+  #map polygon.pulse-green { animation: pulseGreen 1.2s ease-out; }
 
-  #setline { flex: none; font-size: clamp(22px, 3.4vh, 36px); font-weight: 800; margin-bottom: 2px; line-height: 1.15; }
-  #setline .cnt-clean { color: var(--green); } #setline .cnt-cheat { color: var(--red); }
-  .armstate { flex: none; align-self: flex-start; margin-bottom: 8px; padding: 6px 16px; border-radius: 999px; font-weight: 900; letter-spacing: .08em; font-size: clamp(16px, 2.4vh, 24px); border: 2px solid var(--line); color: var(--dim); }
-  .armstate.armed { color: #06240f; background: var(--green); border-color: var(--green); box-shadow: 0 0 18px #2fd67b66; }
-  .armstate.idle { background: var(--panel2); }
-  #setmeta { flex: none; color: var(--dim); font-size: clamp(14px, 1.9vh, 18px); margin-bottom: 8px; }
-  /* Cheat meter: per arm, the last rep's up-phase shoulder help vs that arm's clean reference. */
-  #meters { flex: none; display: grid; gap: 10px; margin-bottom: 10px; }
-  .meter { display: grid; grid-template-columns: clamp(64px, 7vw, 96px) minmax(0, 1fr) clamp(110px, 13vw, 190px); align-items: center; gap: 12px; padding: 8px 12px; border-radius: 12px; background: var(--panel2); border: 2px solid var(--line); }
-  .meter.cheat { border-color: var(--red); background: #2a1515; }
-  .meter.loose { border-color: var(--amber); }
-  .meter.clean { border-color: var(--green); }
-  .meter.off { opacity: .35; }
-  .meter .side { font-size: clamp(16px, 2.4vh, 24px); font-weight: 900; letter-spacing: .06em; }
-  .meter .gauge { position: relative; height: clamp(26px, 4.4vh, 42px); border-radius: 8px; overflow: hidden; display: flex; }
-  .meter .gauge .z { height: 100%; }
-  .meter .gauge .zg { background: #1d5a36; width: 60%; }      /* 0 - 1.2x */
-  .meter .gauge .za { background: #6b5113; width: 7.5%; }     /* 1.2 - 1.35x */
-  .meter .gauge .zr { background: #6b1d1d; flex: 1; }         /* >= 1.35x, scale ends at 2x */
-  .meter .gauge .mk { position: absolute; top: 0; bottom: 0; width: 6px; margin-left: -3px; background: #fff; border-radius: 3px; box-shadow: 0 0 10px #fff; transition: left .25s; }
-  .meter .gauge .mv { position: absolute; top: 50%; transform: translateY(-50%); font-weight: 900; font-size: clamp(14px, 2.2vh, 20px); color: #fff; text-shadow: 0 0 6px #000; white-space: nowrap; }
-  .meter .gauge .learn { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: clamp(13px, 1.9vh, 18px); color: #fff; background: #0e1118cc; }
-  .meter .verdict { font-size: clamp(22px, 4vh, 40px); font-weight: 900; letter-spacing: .04em; text-align: right; line-height: 1; }
-  .meter .verdict small { display: block; font-size: clamp(11px, 1.5vh, 14px); font-weight: 600; color: var(--dim); letter-spacing: 0; margin-top: 4px; }
-  .meter.cheat .verdict { color: var(--red); } .meter.loose .verdict { color: var(--amber); } .meter.clean .verdict { color: var(--green); }
-  .meter .scale { grid-column: 2; display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-top: -6px; }
-  .rawhead { flex: none; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); margin-bottom: 4px; }
-  #bars { flex: 1 1 0; min-height: 64px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-  #bars .bar .val { font-size: clamp(16px, 2.2vh, 24px); }
-  #bars .bar .lbl { font-size: clamp(12px, 1.6vh, 16px); }
-  /* Muscle-map pulse on each rep: front delt red on a cheat, biceps green on a clean rep. */
-  @keyframes pulseRed { 0%, 40%, 80% { fill: #ff2d2d; stroke: #fff; } 20%, 60%, 100% { fill: #7a1414; } }
-  @keyframes pulseGreen { 0%, 40%, 80% { fill: #2fd67b; stroke: #fff; } 20%, 60%, 100% { fill: #1d5a36; } }
-  #map polygon.pulse-red { animation: pulseRed 1.6s ease-in-out; stroke-width: 1.2; }
-  #map polygon.pulse-green { animation: pulseGreen 1.6s ease-in-out; stroke-width: 1.2; }
-  .bar { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; min-width: 0; }
-  .bar .val { flex: none; font-size: clamp(22px, 3.4vh, 34px); font-weight: 800; font-variant-numeric: tabular-nums; }
-  .bar .track { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 110px; background: #0e1118; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .bar .fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; border-radius: 8px 8px 0 0; transition: height .06s linear; }
-  .bar.bi .fill { background: linear-gradient(to top, #1d5fa8, var(--bi)); }
-  .bar.delt .fill { background: linear-gradient(to top, #a8501d, var(--delt)); }
-  .bar.hot .fill { background: linear-gradient(to top, #a81d1d, var(--red)); }
-  .bar .mvc { position: absolute; left: 0; right: 0; border-top: 2px dashed #ffffff55; }
-  .bar .mvc::after { content: "MVC"; position: absolute; right: 4px; top: -18px; font-size: 11px; color: #ffffff88; }
-  .bar .lbl { flex: none; font-size: clamp(15px, 2.1vh, 20px); font-weight: 700; text-align: center; line-height: 1.1; }
-  .bar .lbl small { display: block; color: var(--dim); font-weight: 400; font-size: clamp(11px, 1.5vh, 14px); }
-  .stale .fill { opacity: .35; }
+  #reportCard { gap: 12px; }
+  #coach { flex: none; font-size: var(--fs-l); line-height: 1.35; color: var(--text); max-height: 40%; overflow-y: auto; }
+  #coach:empty::before { content: "The coach's summary appears here after each set."; color: var(--muted); font-size: var(--fs-m); }
+  #report { flex: 1 1 0; min-height: 0; overflow-y: auto; border-top: 1px solid var(--line); padding-top: 12px; font-size: var(--fs-m); line-height: 1.45; }
+  #report:empty { display: none; }
+  #report .r-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s1); font-weight: 600; margin-bottom: 6px; }
+  #report .src { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  #report ul { margin: 0 0 10px; padding-left: 18px; color: var(--text); }
+  #report li { margin: 2px 0; }
+  #report .r-cue { color: var(--text); }
+  #report .r-cue b, #report .r-dec b { color: var(--muted); font-weight: 600; margin-right: 6px; }
+  #report .r-dec { color: var(--muted); margin-top: 4px; }
 
-  #coach { flex: none; margin-top: 12px; padding: 10px 14px; background: var(--panel2); border-radius: 10px; font-size: clamp(14px, 2vh, 20px); line-height: 1.25; max-height: 22%; overflow-y: auto; border-left: 4px solid var(--blue); }
-  #coach:empty::before { content: "Coach line appears after each set."; color: var(--dim); font-size: 17px; }
+  #feed { list-style: none; margin: 0; padding: 0 4px 0 0; overflow-y: auto; flex: 1 1 0; min-height: 0; scrollbar-gutter: stable; }
+  #feed, #report, #coach { scrollbar-width: thin; scrollbar-color: #2C333C transparent; }
+  #feed:empty::before { content: "No reps yet."; color: var(--muted); }
+  #feed li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 5.2em; align-items: center; column-gap: 10px; row-gap: 2px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+  #feed li:last-child { border-bottom: 0; }
+  #feed .v { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  #feed .v.loose { background: var(--warn); } #feed .v.cheat { background: var(--bad); } #feed .v.none { background: transparent; border: 1px solid #3A414B; }
+  #feed .t { font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #feed .t .arm { font-weight: 400; color: var(--muted); }
+  #feed .x { color: var(--muted); text-align: right; }
+  #feed .w { font-size: var(--fs-s); font-weight: 600; text-align: right; color: var(--ok); }
+  #feed .w.loose { color: var(--warn); } #feed .w.cheat { color: var(--bad); } #feed .w.none { color: var(--muted); font-weight: 400; }
+  #feed .d { grid-column: 2 / -1; font-size: var(--fs-s); color: var(--muted); }
+  #feed li.setend .t { color: var(--muted); font-weight: 400; }
+  #feed li.fresh { animation: fadeIn 180ms ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
-  #feed { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-  #feed li { padding: 10px 14px; border-radius: 10px; background: var(--panel2); border-left: 6px solid var(--green); display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
-  #feed li.cheat { border-left-color: var(--red); background: #2a1515; }
-  #feed li.setend { border-left-color: var(--blue); background: #15202e; }
-  #feed .t { font-size: clamp(17px, 2.3vh, 22px); font-weight: 800; }
-  #feed .tag { font-size: clamp(15px, 2.1vh, 20px); font-weight: 800; color: var(--green); text-align: right; }
-  #feed li.cheat .tag { color: var(--red); }
-  #feed li.loose { border-left-color: var(--amber); }
-  #feed li.report { border-left-color: var(--blue); background: #132033; }
-  #feed li.report .tag.src { font-size: 12px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
-  #feed li.report .rep-body { grid-column: 1 / -1; font-size: clamp(14px, 1.9vh, 18px); }
-  #feed li.report .rep-head { font-weight: 800; font-size: clamp(16px, 2.2vh, 21px); margin: 2px 0 4px; }
-  #feed li.report ul { margin: 0 0 4px; padding-left: 20px; }
-  #feed li.report li { padding: 1px 0; background: none; border: 0; display: list-item; }
-  #feed li.report .rep-cue { color: var(--green); font-weight: 700; }
-  #feed li.report .rep-dec { color: var(--dim); }
-  #feed .tag.loose { color: var(--amber); }
-  #feed .d { grid-column: 1 / -1; color: var(--dim); font-size: clamp(13px, 1.7vh, 16px); }
-  #feed li.fresh { animation: pop .5s ease-out; }
-  @keyframes pop { from { transform: scale(1.04); filter: brightness(1.6); } to { transform: none; filter: none; } }
+  /* ---------------------------------------------------------------- toolbar */
+  footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px var(--s2); padding: 12px var(--s3) 14px; border-top: 1px solid var(--line); }
+  .grp { display: flex; gap: var(--s1); align-items: center; flex-wrap: wrap; }
+  footer > .grp + .grp { padding-left: var(--s2); border-left: 1px solid var(--line); }
+  .grp > .gl { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+  #exercise { width: 120px; } #load { width: 60px; } #replaySel { max-width: 220px; } #musicFiles { max-width: 190px; color: var(--muted); }
+  audio { height: 30px; max-width: 220px; }
+  .more { position: relative; }
+  .more summary { list-style: none; cursor: pointer; font-size: var(--fs-s); font-weight: 600; color: var(--muted); padding: 7px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .more summary::-webkit-details-marker { display: none; }
+  .more[open] summary, .more summary:hover { color: var(--text); }
+  .more-pop { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 6; display: flex; flex-direction: column; gap: 12px; padding: var(--s2); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; white-space: nowrap; }
+  .more-pop .grp + .grp { padding-left: 0; border-left: 0; }
+  .more-pop .gl { width: 56px; }
+  @media (max-width: 1400px) { footer > .grp > .gl { display: none; } }
 
-  footer { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 8px 20px 10px; background: var(--bg); border-top: 1px solid var(--line); align-items: center; font-size: 15px; }
-  footer button, footer input, footer select { padding: 6px 10px; }
-  .grp { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .grp > b { color: var(--dim); text-transform: uppercase; font-size: 13px; letter-spacing: .1em; margin-right: 2px; }
-  .grp label { display: inline-flex; gap: 4px; align-items: center; }
-  input[type=number] { width: 80px; }
-  #exercise { width: 140px; }
-  input[type=number]#load { width: 64px; }
-  #replaySel { max-width: 260px; }
-  #musicFiles { max-width: 200px; }
-  audio { height: 32px; max-width: 220px; }
-
-  #cal { position: fixed; inset: 0; background: #07090dee; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 10; text-align: center; padding: 24px; }
-  #cal.show { display: flex; }
-  #calStep { color: var(--dim); font-size: 24px; letter-spacing: .1em; text-transform: uppercase; }
-  #calTitle { font-size: 88px; font-weight: 900; margin: 10px 0; line-height: 1.05; }
-  #calHint { font-size: 28px; color: var(--dim); min-height: 40px; }
-  #calCount { font-size: 160px; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--blue); min-height: 190px; }
-  #calTitle.go { color: var(--red); }
-  #calResult { font-size: 26px; max-width: 900px; }
-  #calResult .bad { color: var(--red); }
-  #calResult .good { color: var(--green); }
-  #toast { position: fixed; right: 22px; top: 70px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 18px; display: none; z-index: 5; max-width: 480px; }
+  /* ---------------------------------------------------------------- overlays */
+  #cal, #cd { position: fixed; inset: 0; background: rgba(11, 13, 16, .94); display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--s3); }
+  #cal { z-index: 10; } #cd { z-index: 9; }
+  #cal.show, #cd.show { display: flex; }
+  #calStep { color: var(--muted); font-size: var(--fs-s); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  #calTitle { font-size: var(--fs-hero); font-weight: 600; margin: 12px 0; letter-spacing: -.02em; }
+  #calTitle.go { color: var(--accent); }
+  #calHint { font-size: var(--fs-l); color: var(--muted); min-height: 28px; }
+  #calCount, #cdText { font-size: clamp(80px, 20vh, 180px); font-weight: 600; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; min-height: 1em; letter-spacing: -.03em; }
+  #calCount { margin: var(--s2) 0; }
+  #cdText.go { color: var(--ok); }
+  #cdSub { font-size: var(--fs-l); color: var(--muted); margin-top: var(--s2); }
+  #calResult { font-size: var(--fs-m); line-height: 1.6; max-width: 900px; color: var(--muted); }
+  #calResult .bad { color: var(--bad); } #calResult .good { color: var(--text); }
+  #toast { position: fixed; right: var(--s3); bottom: 76px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-size: var(--fs-s); display: none; z-index: 11; max-width: 420px; }
   #toast.show { display: block; }
-  #cd { position: fixed; inset: 0; background: #07090de0; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9; text-align: center; }
-  #cd.show { display: flex; }
-  #cdText { font-size: clamp(64px, 18vh, 200px); font-weight: 900; line-height: 1; color: var(--blue); font-variant-numeric: tabular-nums; }
-  #cdText.go { color: var(--green); }
-  #cdSub { font-size: clamp(20px, 3.5vh, 34px); color: var(--dim); margin-top: 16px; }
-  /* Narrow windows: stack and let the page scroll instead of squeezing. */
+
+  /* Narrow or short windows: stack and scroll instead of squeezing. */
   @media (max-width: 1000px), (max-height: 620px) {
     body { height: auto; min-height: 100vh; overflow: auto; }
-    main { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); overflow: visible; }
-    main > .card { height: 460px; }
+    #hero { grid-template-columns: 1fr; }
+    main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: visible; }
+    main > .card { height: 440px; }
     #feedCard { grid-column: 1 / -1; height: 360px; }
   }
-  .idle-note { color: var(--dim); font-size: 0.8em; font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <header>
-  <div class="brand">LIGHTWEIGHT</div>
-  <span class="pill mode" id="mode">LIVE</span>
-  <span class="pill"><span class="dot" id="devDot"></span><span id="devText">No device</span></span>
-  <span class="pill" id="hbText">Heartbeat: none</span>
-  <span class="pill"><span class="dot" id="sseDot"></span><span id="sseText">Dashboard link</span></span>
-  <span class="pill" id="spk" role="button" tabindex="0">🔇 …</span>
+  <div class="brand">Lightweight</div>
+  <div class="status">
+    <span id="mode">Live</span><span class="sep"></span>
+    <span><span class="dot" id="devDot"></span><span id="devText">No device</span></span><span class="sep"></span>
+    <span id="hbText">No heartbeat</span>
+    <span id="sseWrap"><span class="sep"></span><span class="dot" id="sseDot"></span><span id="sseText">Connecting</span></span>
+    <span class="sep"></span><span id="spk" role="button" tabindex="0">Voice</span>
+  </div>
   <span class="grow"></span>
-  <span class="who" id="who">No session</span>
+  <span id="who">No session</span>
 </header>
 <div id="banner"><span id="bannerText"></span></div>
 
+<section class="card" id="hero">
+  <div id="heroStatus">
+    <div id="armState" class="idle">Idle</div>
+    <div id="setline">Ready</div>
+    <div id="setmeta">Start a set when you're set up.</div>
+    <button id="heroStart" class="primary">Start set<kbd>Space</kbd></button>
+  </div>
+  <div id="meters"></div>
+</section>
+
 <main>
   <section class="card">
-    <h2>Muscle map</h2>
+    <div class="label">Muscle map</div>
     <div id="map"></div>
-    <div class="maplegend"><span>◀ Right arm</span><span>Gray = not measured</span><span>Left arm ▶</span></div>
+    <div class="maplegend"><span>Gray muscles are not measured</span></div>
+    <div class="label" style="margin-bottom:8px">Raw effort · %MVC</div>
+    <div id="bars"></div>
   </section>
 
-  <section class="card">
-    <div id="armState" class="armstate idle">IDLE · press Start set (S)</div>
-    <div id="setline">Ready</div>
-    <div id="setmeta">Start a set or just curl.</div>
-    <div id="meters"></div>
-    <div class="rawhead">Raw effort (%MVC)</div>
-    <div id="bars"></div>
+  <section class="card" id="reportCard">
+    <div class="label">Coach</div>
     <div id="coach"></div>
+    <div id="report"></div>
   </section>
 
   <section class="card" id="feedCard">
-    <h2>Reps</h2>
+    <div class="label">Reps</div>
     <ul id="feed"></ul>
   </section>
 </main>
 
 <footer>
-  <div class="grp"><b>Session</b>
-    <button id="btnNew">New session (Mike)</button>
-    <button id="btnWalkup">Walk-up…</button>
-    <label><input type="checkbox" id="armR" checked> R arm</label>
-    <label><input type="checkbox" id="armL" checked> L arm</label>
+  <div class="grp"><span class="gl">Session</span>
+    <button id="btnNew">New session</button>
+    <button id="btnWalkup">Walk-up</button>
+    <label><input type="checkbox" id="armR" checked> R</label>
+    <label><input type="checkbox" id="armL" checked> L</label>
   </div>
-  <div class="grp"><b>Calibrate</b>
-    <button id="btnCal">Calibrate (C) · optional</button>
-  </div>
-  <div class="grp"><b>Set</b>
+  <div class="grp"><span class="gl">Set</span>
     <input id="exercise" value="dumbbell curl" aria-label="Exercise">
     <select id="variant" aria-label="Variant"><option>standing</option><option>preacher</option><option>hammer</option></select>
-    <input id="load" type="number" value="35" min="0" step="5" aria-label="Load lb"> lb
-    <label><input type="checkbox" id="autoNext"> auto next</label>
-    <label title="After a set ends and the coach is done, wait 20 s, then count down the next set. Any key cancels."><input type="checkbox" id="handsFree" checked> hands-free loop</label>
-    <button id="btnStart" class="primary">Start set (S / Space)</button>
-    <button id="btnStop">Stop set (X)</button>
+    <input id="load" type="number" value="35" min="0" step="5" aria-label="Load lb"><label>lb</label>
+    <label title="After a set ends and the coach is done, wait 20 s, then count down the next set. Any key cancels."><input type="checkbox" id="handsFree" checked> Hands-free</label>
+    <button id="btnStart" class="primary">Start set<kbd>Space</kbd></button>
+    <button id="btnStop">Stop<kbd>X</kbd></button>
   </div>
-  <div class="grp"><b>Replay</b>
-    <select id="replaySel" aria-label="Session to replay"></select>
-    <button id="btnReplay">Replay</button>
-    <button id="btnReplayStop" class="danger">Stop</button>
-  </div>
-  <div class="grp"><b>Music</b>
-    <input type="file" id="musicFiles" accept="audio/*" multiple aria-label="Music files">
-    <audio id="music" controls></audio>
-  </div>
+  <span class="grow"></span>
+  <details class="more">
+    <summary>More</summary>
+    <div class="more-pop">
+      <div class="grp"><span class="gl">Setup</span>
+        <button id="btnCal">Calibrate<kbd>C</kbd></button>
+        <label title="Re-arm a new set automatically after each set ends (old behaviour)."><input type="checkbox" id="autoNext"> Auto next</label>
+      </div>
+      <div class="grp"><span class="gl">Replay</span>
+        <select id="replaySel" aria-label="Session to replay"></select>
+        <button id="btnReplay">Replay</button>
+        <button id="btnReplayStop" class="danger">Stop</button>
+      </div>
+      <div class="grp"><span class="gl">Music</span>
+        <input type="file" id="musicFiles" accept="audio/*" multiple aria-label="Music files">
+        <audio id="music" controls></audio>
+      </div>
+    </div>
+  </details>
 </footer>
 
 <div id="cal">
@@ -233,7 +293,7 @@
   <p><button id="calCancel" class="danger">Cancel</button> <button id="calClose" style="display:none" class="primary">Done</button></p>
 </div>
 <div id="toast"></div>
-<div id="cd"><div id="cdText"></div><div id="cdSub"></div><p><button id="cdCancel" class="danger">Cancel (X)</button></p></div>
+<div id="cd"><div id="cdText"></div><div id="cdSub"></div><p><button id="cdCancel">Cancel<kbd>X</kbd></button></p></div>
 
 <script src="/voice-player.js" onerror="window.__lwNoVoice = true"></script>
 <script src="/app.js"></script>
