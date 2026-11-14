@@ -37,7 +37,7 @@
 
   #banner { height: 0; overflow: hidden; transition: height .15s; background: var(--red); color: #fff; text-align: center; font-weight: 900; letter-spacing: .04em; }
   #banner.show { height: clamp(64px, 10vh, 96px); }
-  #banner span { display: block; font-size: clamp(36px, 6vh, 64px); line-height: clamp(64px, 10vh, 96px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #banner span { display: block; font-size: clamp(26px, min(6vh, 3.3vw), 64px); line-height: clamp(64px, 10vh, 96px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   main { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; padding: 14px 20px; min-height: 0; overflow: hidden; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -52,8 +52,36 @@
   .armstate { flex: none; align-self: flex-start; margin-bottom: 8px; padding: 6px 16px; border-radius: 999px; font-weight: 900; letter-spacing: .08em; font-size: clamp(16px, 2.4vh, 24px); border: 2px solid var(--line); color: var(--dim); }
   .armstate.armed { color: #06240f; background: var(--green); border-color: var(--green); box-shadow: 0 0 18px #2fd67b66; }
   .armstate.idle { background: var(--panel2); }
-  #setmeta { flex: none; color: var(--dim); font-size: clamp(14px, 1.9vh, 18px); margin-bottom: 10px; }
-  #bars { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  #setmeta { flex: none; color: var(--dim); font-size: clamp(14px, 1.9vh, 18px); margin-bottom: 8px; }
+  /* Cheat meter: per arm, the last rep's up-phase shoulder help vs that arm's clean reference. */
+  #meters { flex: none; display: grid; gap: 10px; margin-bottom: 10px; }
+  .meter { display: grid; grid-template-columns: clamp(64px, 7vw, 96px) minmax(0, 1fr) clamp(110px, 13vw, 190px); align-items: center; gap: 12px; padding: 8px 12px; border-radius: 12px; background: var(--panel2); border: 2px solid var(--line); }
+  .meter.cheat { border-color: var(--red); background: #2a1515; }
+  .meter.loose { border-color: var(--amber); }
+  .meter.clean { border-color: var(--green); }
+  .meter.off { opacity: .35; }
+  .meter .side { font-size: clamp(16px, 2.4vh, 24px); font-weight: 900; letter-spacing: .06em; }
+  .meter .gauge { position: relative; height: clamp(26px, 4.4vh, 42px); border-radius: 8px; overflow: hidden; display: flex; }
+  .meter .gauge .z { height: 100%; }
+  .meter .gauge .zg { background: #1d5a36; width: 60%; }      /* 0 - 1.2x */
+  .meter .gauge .za { background: #6b5113; width: 7.5%; }     /* 1.2 - 1.35x */
+  .meter .gauge .zr { background: #6b1d1d; flex: 1; }         /* >= 1.35x, scale ends at 2x */
+  .meter .gauge .mk { position: absolute; top: 0; bottom: 0; width: 6px; margin-left: -3px; background: #fff; border-radius: 3px; box-shadow: 0 0 10px #fff; transition: left .25s; }
+  .meter .gauge .mv { position: absolute; top: 50%; transform: translateY(-50%); font-weight: 900; font-size: clamp(14px, 2.2vh, 20px); color: #fff; text-shadow: 0 0 6px #000; white-space: nowrap; }
+  .meter .gauge .learn { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: clamp(13px, 1.9vh, 18px); color: #fff; background: #0e1118cc; }
+  .meter .verdict { font-size: clamp(22px, 4vh, 40px); font-weight: 900; letter-spacing: .04em; text-align: right; line-height: 1; }
+  .meter .verdict small { display: block; font-size: clamp(11px, 1.5vh, 14px); font-weight: 600; color: var(--dim); letter-spacing: 0; margin-top: 4px; }
+  .meter.cheat .verdict { color: var(--red); } .meter.loose .verdict { color: var(--amber); } .meter.clean .verdict { color: var(--green); }
+  .meter .scale { grid-column: 2; display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-top: -6px; }
+  .rawhead { flex: none; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); margin-bottom: 4px; }
+  #bars { flex: 1 1 0; min-height: 64px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  #bars .bar .val { font-size: clamp(16px, 2.2vh, 24px); }
+  #bars .bar .lbl { font-size: clamp(12px, 1.6vh, 16px); }
+  /* Muscle-map pulse on each rep: front delt red on a cheat, biceps green on a clean rep. */
+  @keyframes pulseRed { 0%, 40%, 80% { fill: #ff2d2d; stroke: #fff; } 20%, 60%, 100% { fill: #7a1414; } }
+  @keyframes pulseGreen { 0%, 40%, 80% { fill: #2fd67b; stroke: #fff; } 20%, 60%, 100% { fill: #1d5a36; } }
+  #map polygon.pulse-red { animation: pulseRed 1.6s ease-in-out; stroke-width: 1.2; }
+  #map polygon.pulse-green { animation: pulseGreen 1.6s ease-in-out; stroke-width: 1.2; }
   .bar { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; min-width: 0; }
   .bar .val { flex: none; font-size: clamp(22px, 3.4vh, 34px); font-weight: 800; font-variant-numeric: tabular-nums; }
   .bar .track { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 110px; background: #0e1118; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -67,7 +95,7 @@
   .bar .lbl small { display: block; color: var(--dim); font-weight: 400; font-size: clamp(11px, 1.5vh, 14px); }
   .stale .fill { opacity: .35; }
 
-  #coach { flex: none; margin-top: 12px; padding: 10px 14px; background: var(--panel2); border-radius: 10px; font-size: clamp(16px, 2.3vh, 22px); line-height: 1.3; max-height: 30%; overflow-y: auto; border-left: 4px solid var(--blue); }
+  #coach { flex: none; margin-top: 12px; padding: 10px 14px; background: var(--panel2); border-radius: 10px; font-size: clamp(14px, 2vh, 20px); line-height: 1.25; max-height: 22%; overflow-y: auto; border-left: 4px solid var(--blue); }
   #coach:empty::before { content: "Coach line appears after each set."; color: var(--dim); font-size: 17px; }
 
   #feed { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -77,6 +105,8 @@
   #feed .t { font-size: clamp(17px, 2.3vh, 22px); font-weight: 800; }
   #feed .tag { font-size: clamp(15px, 2.1vh, 20px); font-weight: 800; color: var(--green); text-align: right; }
   #feed li.cheat .tag { color: var(--red); }
+  #feed li.loose { border-left-color: var(--amber); }
+  #feed .tag.loose { color: var(--amber); }
   #feed .d { grid-column: 1 / -1; color: var(--dim); font-size: clamp(13px, 1.7vh, 16px); }
   #feed li.fresh { animation: pop .5s ease-out; }
   @keyframes pop { from { transform: scale(1.04); filter: brightness(1.6); } to { transform: none; filter: none; } }
@@ -144,6 +174,8 @@
     <div id="armState" class="armstate idle">IDLE · press Start set (S)</div>
     <div id="setline">Ready</div>
     <div id="setmeta">Start a set or just curl.</div>
+    <div id="meters"></div>
+    <div class="rawhead">Raw effort (%MVC)</div>
     <div id="bars"></div>
     <div id="coach"></div>
   </section>

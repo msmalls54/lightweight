@@ -112,6 +112,7 @@
       const used = activeArms.includes(b.i < 2 ? "R" : "L");
       b.el.style.opacity = used ? "1" : "0.35";
     });
+    for (const arm of ["R", "L"]) meters[arm].classList.toggle("off", !activeArms.includes(arm));
     CH_INFO.forEach((c, i) => {
       for (const p of mapShapes[`${c.muscle}/${c.side}`] || []) p.setAttribute("fill", heat(stale ? 0 : live[i] || 0));
     });
@@ -139,13 +140,84 @@
     while (feed.children.length > 40) feed.lastChild.remove();
     setTimeout(() => li.classList.remove("fresh"), 600);
   }
+  // ------------------------------------------------------------ cheat meter (per arm)
+  // Up-phase shoulder help as a multiple of the arm's clean reference: up_delt_ratio / baseline_up_delt_ratio.
+  // Zones: green < 1.2x, amber 1.2-1.35x, red >= 1.35x. The verdict is the CODE's flag: rep.cheat -> CHEAT.
+  const METER_MAX = 2; // gauge scale 0..2x; bigger values pin to the right edge with their number
+  function repMultiple(r) {
+    const up = r.up_delt_ratio, base = r.baseline_up_delt_ratio;
+    return up != null && base != null && base > 0 ? up / base : null;
+  }
+  function verdictOf(r) {
+    const m = repMultiple(r);
+    if (r.cheat) return "CHEAT";
+    if (m != null && m >= 1.2) return "LOOSE";
+    return "CLEAN";
+  }
+  const fmtX = m => (m >= 10 ? `${Math.round(m)}×` : `${m.toFixed(1)}×`);
+  const meters = {};
+  for (const arm of ["R", "L"]) {
+    const el = document.createElement("div");
+    el.className = "meter";
+    el.innerHTML = `<div class="side">${arm === "R" ? "RIGHT" : "LEFT"}</div>
+      <div class="gauge"><div class="z zg"></div><div class="z za"></div><div class="z zr"></div><div class="mk" style="display:none"></div><div class="mv"></div><div class="learn">learning your clean rep… (2 reps)</div></div>
+      <div class="verdict">–<small>shoulder help vs your clean rep</small></div>
+      <div class="scale"><span>0×</span><span>1.2×</span><span>2×+</span></div>`;
+    $("meters").appendChild(el);
+    meters[arm] = el;
+  }
+  function resetMeters() {
+    for (const arm of ["R", "L"]) {
+      const el = meters[arm];
+      el.classList.remove("cheat", "loose", "clean");
+      el.querySelector(".mk").style.display = "none";
+      el.querySelector(".mv").textContent = "";
+      el.querySelector(".learn").style.display = "";
+      el.querySelector(".learn").textContent = "learning your clean rep… (2 reps)";
+      el.querySelector(".verdict").innerHTML = `–<small>shoulder help vs your clean rep</small>`;
+    }
+  }
+  function updateMeter(r) {
+    const el = meters[r.arm];
+    if (!el) return;
+    const m = repMultiple(r), v = verdictOf(r);
+    el.classList.remove("cheat", "loose", "clean");
+    el.classList.add(v === "CHEAT" ? "cheat" : v === "LOOSE" ? "loose" : "clean");
+    const mk = el.querySelector(".mk"), mv = el.querySelector(".mv"), learn = el.querySelector(".learn");
+    if (m == null) {
+      mk.style.display = "none"; mv.textContent = "";
+      learn.style.display = "";
+      learn.textContent = r.cheat ? "no clean reference yet: flagged on an obvious swing" : `learning your clean rep… (rep ${r.rep} of 2)`;
+    } else {
+      learn.style.display = "none";
+      const x = Math.min(m, METER_MAX) / METER_MAX * 100;
+      mk.style.display = ""; mk.style.left = `${Math.max(1, Math.min(99, x))}%`;
+      mv.textContent = fmtX(m);
+      mv.style.left = x > 70 ? "" : `calc(${x}% + 10px)`;
+      mv.style.right = x > 70 ? `calc(${100 - x}% + 10px)` : "";
+    }
+    el.querySelector(".verdict").innerHTML = `${v}<small>rep ${r.rep}${m != null ? ` · ${fmtX(m)} shoulder` : ""}</small>`;
+  }
+  function pulseMap(r) {
+    const side = r.arm === "L" ? "left" : "right";
+    const key = r.cheat ? `front-deltoids/${side}` : `biceps/${side}`;
+    const cls = r.cheat ? "pulse-red" : "pulse-green";
+    for (const p of mapShapes[key] || []) {
+      p.classList.remove("pulse-red", "pulse-green");
+      void p.getBBox(); // restart the animation
+      p.classList.add(cls);
+      setTimeout(() => p.classList.remove(cls), 1700);
+    }
+  }
+
   function repHtml(r) {
     const armName = r.arm === "L" ? "Left" : "Right";
     const bi = r.arm === "L" ? 2 : 0, de = bi + 1;
-    const why = r.cheat ? (r.cheat_reason === "delt_peak" ? "DELT SPIKE" : "DELT TOOK OVER") : "CLEAN";
+    const v = verdictOf(r), m = repMultiple(r);
+    const why = v === "CHEAT" ? (r.cheat_reason === "delt_peak" ? "CHEAT · delt spike" : "CHEAT") : v;
     const bal = r.r_share != null ? ` · R/L ${Math.round(r.r_share * 100)}/${Math.round((1 - r.r_share) * 100)}` : "";
     const base = r.baseline_delt_share != null ? ` (base ${pct(r.baseline_delt_share)})` : "";
-    return `<span class="t">${r.set_no ? `Set ${r.set_no} · ` : ""}Rep ${r.rep}${activeArms.length > 1 ? ` · ${armName}` : ""}</span><span class="tag">${why}</span>
+    return `<span class="t">${r.set_no ? `Set ${r.set_no} · ` : ""}Rep ${r.rep} · ${armName}${m != null ? ` · ${fmtX(m)} shoulder` : ""}</span><span class="tag${v === "LOOSE" ? " loose" : ""}">${why}</span>
       <span class="d">delt share ${pct(r.delt_share)}${base} · biceps peak ${pct(r.peak_pct[bi])} · delt peak ${pct(r.peak_pct[de])}${bal}</span>`;
   }
   let bannerTimer;
@@ -161,8 +233,10 @@
     setState.set_no = r.set_no ?? setState.set_no;
     setState.reps.set(r.rep, !!(setState.reps.get(r.rep) || r.cheat));
     renderSetLine();
-    addFeed(repHtml(r), r.cheat ? "cheat" : "");
+    addFeed(repHtml(r), r.cheat ? "cheat" : verdictOf(r) === "LOOSE" ? "loose" : "");
+    updateMeter(r);
     if (!fresh) return;
+    pulseMap(r);
     const key = `${r.set_id}:${r.rep}`, prev = cuePlayed.get(key);
     const cheatArms = new Set(prev?.cheatArms ?? []);
     if (r.cheat) cheatArms.add(r.arm);
@@ -391,11 +465,11 @@
         case "calibrate_request": calibrate(); break;
         case "session":
           clearStale();
-          $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); $("coach").textContent = "";
+          $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); $("coach").textContent = ""; resetMeters();
           toast(`New session: ${e.person}${e.walkup ? " (walk-up)" : ""}`);
           break;
         case "replay":
-          if (e.phase === "start") { clearStale(); $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); toast("Replay started"); }
+          if (e.phase === "start") { clearStale(); resetMeters(); $("feed").innerHTML = ""; currentSetId = null; setState = newSet(); renderSetLine(); toast("Replay started"); }
           else { toast(`Replay ${e.phase}`); loadSessions(); }
           break;
       }
