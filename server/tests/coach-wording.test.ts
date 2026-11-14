@@ -75,7 +75,7 @@ test("history is compared only like-for-like (35 lb dumbbell != Nov 13 band curl
   assert.match(seen, /LAST_SESSION_SAME_LIFT: none/);
   assert.doesNotMatch(seen, /2026-11-13|bench_test|cheat \(swing\)/); // no trace of the Nov 13 band-curl day
   assert.equal(line, fallbackSummary(CLEAN3)); // quoted 51% delt share + yesterday -> rejected
-  assert.equal(line, "All 3 reps clean, your shoulder stayed in its normal range. Same groove next set: elbows pinned, squeeze at the top. Same weight, keep going.");
+  assert.equal(line, "All 3 reps clean, shoulder in its normal range. Same groove: elbows pinned, squeeze at the top. Same weight, keep going.");
 
   setBrain(async () => "All three clean, better than yesterday. Same weight, keep going.");
   assert.equal(await summarizeSet(ctx, CLEAN3), fallbackSummary(CLEAN3)); // mentions history without like-for-like data
@@ -128,7 +128,7 @@ test("all-clean set: plain words and a technique cue, no numbers", async () => {
   const d = await summarizeSetDetail(buildCoachContext({ person: "Mike", todaySets: [CLEAN3], dataDir: DATA }), CLEAN3);
   assert.equal(d.headline, "All 3 reps clean");
   assert.match(d.bullets.join(" "), /shoulder stayed in its normal range/);
-  assert.equal(d.cue, "Same groove next set: elbows pinned, squeeze at the top.");
+  assert.equal(d.cue, "Same groove: elbows pinned, squeeze at the top.");
   assert.doesNotMatch(JSON.stringify(d), /delt share|51|2026-11-13/);
   setBrain(undefined);
 });
@@ -136,7 +136,7 @@ test("all-clean set: plain words and a technique cue, no numbers", async () => {
 test("first reps before any clean reference: 'learning your clean rep'", () => {
   const learning: SetEndEvent = { ...CLEAN3, reps: CLEAN3.reps.slice(0, 2) };
   assert.equal(setFacts(learning).reference_status, "learning");
-  assert.equal(fallbackSummary(learning), "2 reps in. I'm still learning your clean rep, so no calls yet. Keep them strict.");
+  assert.equal(fallbackSummary(learning), "2 reps in. Still learning your clean rep, so no calls yet. Keep them strict.");
   const d = fallbackDetail(learning);
   assert.equal(d.headline, "2 reps in, learning your clean rep");
   assert.match(d.bullets[0], /^Learning your clean rep/);

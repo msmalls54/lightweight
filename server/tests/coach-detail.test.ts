@@ -48,13 +48,13 @@ test("real set 2: fatigue pattern from rep 6", () => {
   assert.deepEqual(f.cheat_reps, [6, 7, 8, 9, 10]);
   assert.match(f.cheat_pattern, /^fatigue/);
   assert.deepEqual(f.tempo.fast_up_reps, [1, 4, 7]);
-  assert.match(fallbackSummary(SET2), /^From rep 6 on, your right shoulder took over, 8 to 12 times its normal share on the way up\./);
+  assert.match(fallbackSummary(SET2), /^From rep 6 on, your right shoulder took over, 8 to 12 times normal\. Next set, stop at the first cheat\.$/);
 });
 
 test("fallback spoken line names every cheat rep and the why", () => {
   assert.equal(
     fallbackSummary(SET1),
-    "Reps 4 and 8: your right shoulder did 9 and 7 times its normal share on the way up, that's a swing. Rep 5 was a smaller cheat at 2 times normal. Next set, stop at the first cheat and rest longer, same weight.",
+    "Reps 4 and 8: right shoulder at 9 and 7 times normal, that's a swing. Rep 5 smaller. Next set, stop at the first cheat.",
   );
 });
 
@@ -88,13 +88,14 @@ test("summarizeSet: per-rep table reaches the brain; a line missing a cheat rep 
   assert.match(seen, /"fast_up_reps":\[\]/);
   assert.match(seen, /Name every cheat rep by number \(4, 5, 8\)/);
 
-  const good = "Reps 4 and 8: your right shoulder fired 8 times harder than your clean reps, that's a swing. Rep 5 was smaller. Stop at the first cheat next set and rest longer, same weight.";
+  const good = "Reps 4 and 8: your right shoulder fired 8 times harder than clean, a swing. Rep 5 was smaller. Stop at the first cheat.";
   setBrain(async () => good);
   assert.equal(await summarizeSet(ctx(), SET1), good);
 
-  setBrain(async () => good + " ".repeat(2) + "And another thing ".repeat(20));
-  const long = await summarizeSet(ctx(), SET1);
-  assert.ok(long.split(/\s+/).length <= 55, long);
+  setBrain(async () => good + " And another thing that goes on and on and on.");
+  assert.equal(await summarizeSet(ctx(), SET1), good); // trimmed to whole sentences within 25 words
+  setBrain(async () => "Reps 4, 5 and 8 were cheats where your right shoulder did far more of the work than it does on any of your clean reps today, so watch it.");
+  assert.equal(await summarizeSet(ctx(), SET1), fallbackSummary(SET1)); // one 30-word sentence: can't trim
 
   setBrain(async () => "Reps 4, 5 and 8 cheated. That shoulder strain will get you injured.");
   assert.equal(await summarizeSet(ctx(), SET1), fallbackSummary(SET1));
