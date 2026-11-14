@@ -526,6 +526,7 @@
       .then(r => (r.ok ? r.blob() : null)).then(b => {
         if (!b) { lead = null; return; }
         const a = new Audio(URL.createObjectURL(b));
+        try { if (audioOut.id && typeof a.setSinkId === "function") a.setSinkId(audioOut.id).catch(() => {}); } catch { /* ignore */ }
         a.addEventListener("loadedmetadata", () => { lead.ms = Math.round((a.duration || 0) * 1000); });
         lead.audio = a;
       }).catch(() => { lead = null; });
@@ -603,6 +604,72 @@
     if (waitingSet === setId) scheduleNext();
   }
   for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, () => { cancelLoop(); }, true);
+
+  // ------------------------------------------------------------ coach audio output (speaker / earbuds)
+  // One chosen output for every audio path on this tab: Web Audio voices (LWAudio), the countdown voice, the music.
+  // Browser speech (the last-resort fallback) can't be routed and uses the system default.
+  const AO_KEY = "lw.audioOut";
+  let audioOut = { id: "", label: "System default" };
+  try { const v = JSON.parse(localStorage.getItem(AO_KEY) || "null"); if (v && typeof v.id === "string") audioOut = v; } catch { /* ignore */ }
+  const isHandsFree = label => /hands-?free|headset/i.test(label || "") && !/headphones/i.test(label || "");
+  function outLabel(d, i) { return d.label || `Audio output ${i + 1} (allow the mic to see names)`; }
+  async function listOutputs() {
+    try { return (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audiooutput" && d.deviceId !== "default" && d.deviceId !== "communications"); }
+    catch { return []; }
+  }
+  function applySink(id) {
+    const sid = id || "";
+    try { window.LWAudio?.setSinkId?.(sid); } catch { /* ignore */ }
+    for (const el of [$("music"), lead?.audio].filter(Boolean)) { try { if (typeof el.setSinkId === "function") el.setSinkId(sid).catch(() => {}); } catch { /* ignore */ } }
+  }
+  function renderAudioOut(note) {
+    $("coachOut").textContent = `Coach → ${audioOut.id ? audioOut.label : "System default"}`;
+    $("coachOut").classList.toggle("warn", isHandsFree(audioOut.label));
+    const warn = isHandsFree(audioOut.label)
+      ? "Hands-Free is call-quality audio (and grabs the mic). Pick the \"Headphones\" entry for the same device."
+      : (note || (window.LWAudio?.canSetSink && !window.LWAudio.canSetSink() ? "This browser can't route the coach's voice; it uses the system default." : ""));
+    $("audioWarn").textContent = warn;
+    $("audioWarn").classList.toggle("hidden", !warn);
+  }
+  async function refreshOutputs() {
+    const outs = await listOutputs();
+    // Headphones (A2DP, music quality) first, Hands-Free/Headset (call mode) last.
+    outs.sort((a, b) => (isHandsFree(a.label) ? 1 : 0) - (isHandsFree(b.label) ? 1 : 0) || (/headphones/i.test(b.label) ? 1 : 0) - (/headphones/i.test(a.label) ? 1 : 0));
+    const sel = $("audioOut");
+    sel.innerHTML = '<option value="">System default</option>' + outs.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(outLabel(d, i))}</option>`).join("");
+    let note = "";
+    if (audioOut.id && !outs.some(d => d.deviceId === audioOut.id)) {
+      note = `"${audioOut.label}" is not connected: using the system default.`;
+      if (refreshOutputs.seen) toast(note, 6000);
+      audioOut = { id: "", label: "System default" };
+      try { localStorage.setItem(AO_KEY, JSON.stringify(audioOut)); } catch { /* ignore */ }
+    } else if (audioOut.id) {
+      const d = outs.find(x => x.deviceId === audioOut.id);
+      if (d?.label) audioOut.label = d.label; // labels appear once mic permission is granted
+    }
+    refreshOutputs.seen = true;
+    sel.value = audioOut.id;
+    applySink(audioOut.id);
+    renderAudioOut(note);
+    return outs;
+  }
+  $("audioOut").onchange = e => {
+    const o = e.target.selectedOptions[0];
+    audioOut = { id: e.target.value, label: e.target.value ? o.textContent : "System default" };
+    try { localStorage.setItem(AO_KEY, JSON.stringify(audioOut)); } catch { /* ignore */ }
+    applySink(audioOut.id);
+    renderAudioOut();
+  };
+  $("testVoice").onclick = () => {
+    if (QUIET) { toast("Quiet mode is on: no audio."); return; }
+    if (MUTED) { toast("This tab is muted (?mute=1)."); console.info("[test voice] rep_1 ->", audioOut.label); return; }
+    try { window.LWAudio?.unlock?.(); } catch { /* ignore */ }
+    applySink(audioOut.id);
+    if (window.LWAudio?.playClip) window.LWAudio.playClip("rep_1"); else toast("Voice player not loaded.");
+  };
+  try { navigator.mediaDevices?.addEventListener?.("devicechange", () => { refreshOutputs(); }); } catch { /* ignore */ }
+  window.LWAudioOut = { refresh: refreshOutputs, get current() { return audioOut; } };
+  setTimeout(refreshOutputs, 0);
 
   // ------------------------------------------------------------ quiet mode
   function applyQuiet(on) {

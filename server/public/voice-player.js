@@ -36,11 +36,13 @@
   var queue = Promise.resolve(); // serialises say()
   var lastStart = 0;
   var coach = {}; // setId -> {text, timer, done}
+  var sinkId = ""; // audio output for every voice (③ dashboard: "Coach audio output"); "" = system default
 
   function audioCtx() {
     if (!ctx) {
       var AC = window.AudioContext || window.webkitAudioContext;
       if (AC) ctx = new AC();
+      if (ctx && sinkId && typeof ctx.setSinkId === "function") ctx.setSinkId(sinkId).catch(function () {});
     }
     return ctx;
   }
@@ -241,6 +243,19 @@
     cooldownMs: 3000,
     fallbackMs: 5000,
     ready: null, // Promise: all clips preloaded
+
+    /** Route every voice (clips, coach audio, say) to an output device; "" = system default. Returns a Promise. */
+    setSinkId: function (id) {
+      sinkId = id || "";
+      var c = ctx;
+      if (c && typeof c.setSinkId === "function") return c.setSinkId(sinkId).catch(function (e) { console.warn("[LWAudio] setSinkId", e); });
+      return Promise.resolve();
+    },
+    /** True when this browser can route Web Audio to a chosen device (Chrome 110+). */
+    canSetSink: function () {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      return !!(AC && AC.prototype && typeof AC.prototype.setSinkId === "function");
+    },
 
     setMusic: function (el) {
       music = el || null;
