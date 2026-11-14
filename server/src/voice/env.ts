@@ -38,3 +38,12 @@ export function loadEnvKey(name: string): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Key for Gemini TTS only: GEMINI_TTS_API_KEY if set (a higher-quota key), else GEMINI_API_KEY.
+ * The coach brain keeps using GEMINI_API_KEY. Never log the value.
+ */
+export function loadGeminiTtsKey(): string | undefined {
+  const base = loadGeminiKey(); // also loads the .env
+  return process.env.GEMINI_TTS_API_KEY || base;
+}

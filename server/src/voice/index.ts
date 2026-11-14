@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Hono } from "hono";
-import { loadElevenKey, loadGeminiKey } from "./env.js";
+import { loadElevenKey, loadGeminiKey, loadGeminiTtsKey } from "./env.js";
 import { buildSteps, runChain, ttsProviderMode, type TtsResult, type TtsStep } from "./chain.js";
 import { elevenSynth, isMp3 } from "./elevenlabs.js";
 import { SAY_TTS_MODELS, SAY_TTS_TIMEOUT_MS, SPOKEN_FIRST_SENTENCE_MAX_WORDS, TTS_MODEL, voiceId } from "./models.js";
@@ -11,7 +11,7 @@ import { geminiSynth, type Synth } from "./tts.js";
 import { isWav, trimSilence } from "./wav.js";
 
 export { pcmToWav, ensureWav, isWav, trimSilence, wavDurationMs } from "./wav.js";
-export { loadGeminiKey, loadElevenKey } from "./env.js";
+export { loadGeminiKey, loadGeminiTtsKey, loadElevenKey } from "./env.js";
 export { ttsProviderMode, runChain, buildSteps, type TtsResult, type TtsStep, type TtsMode } from "./chain.js";
 export { elevenSynth, isMp3, pickCoachVoice, ELEVEN_MODEL, ELEVEN_DOCS_EXAMPLE_VOICE } from "./elevenlabs.js";
 export type { Synth } from "./tts.js";
@@ -129,7 +129,7 @@ async function elevenVoiceId(): Promise<string> {
 
 /** Clip generation chain: Gemini (TTS_MODEL first), then ElevenLabs; `only` forces one provider. */
 function clipSteps(only?: string): TtsStep[] {
-  const gemini = state.synth ?? (loadGeminiKey() ? getSynth() : undefined);
+  const gemini = state.synth ?? (loadGeminiTtsKey() ? getSynth() : undefined);
   const name = state.synth && !state.synthIsGemini ? "test" : "gemini";
   const g = gemini ? [{ name, synth: gemini }] : [];
   const e = getEleven() ? [{ name: "elevenlabs", synth: getEleven()! }] : [];
@@ -140,7 +140,7 @@ function clipSteps(only?: string): TtsStep[] {
 
 function getSynth(): Synth {
   if (state.synth) return state.synth;
-  const apiKey = loadGeminiKey();
+  const apiKey = loadGeminiTtsKey();
   if (!apiKey) throw new Error("GEMINI_API_KEY not set (repo-root .env)");
   state.synth = geminiSynth({ apiKey });
   return state.synth;
@@ -323,7 +323,7 @@ export function dashboardBuild(): string {
 function getSaySynth(): Synth | undefined {
   if (state.saySynth) return state.saySynth;
   if (state.synth && !state.synthIsGemini) return state.synth; // injected (tests)
-  const apiKey = loadGeminiKey();
+  const apiKey = loadGeminiTtsKey();
   if (!apiKey) return undefined;
   state.saySynth = geminiSynth({ apiKey, models: SAY_TTS_MODELS, timeoutMs: SAY_TTS_TIMEOUT_MS });
   return state.saySynth;
