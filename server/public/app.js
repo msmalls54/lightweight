@@ -107,10 +107,27 @@
     $("map").appendChild(svg);
   }).catch(() => { $("map").textContent = "Muscle map not available"; });
 
-  function heat(v) { // 0..1 -> dark gray to red
+  // Live effort tint: gray -> accent blue by %MVC. Red is ONLY ever a cheat verdict (the pulse below).
+  const MAP_GRAY = [37, 42, 50], MAP_TINT = [76, 141, 255];
+  function heat(v) {
     const t = Math.max(0, Math.min(1, v));
-    const a = [37, 42, 50], b = [239, 68, 68];
-    return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`;
+    return `rgb(${MAP_GRAY.map((x, i) => Math.round(x + (MAP_TINT[i] - x) * t)).join(",")})`;
+  }
+  // The body only "breathes" while a set is armed/running (or reps are arriving, e.g. a replay);
+  // at idle it is all gray, and the resting level is re-estimated so a relaxed muscle reads ~0%.
+  let mapArmed = false, mapRepsUntil = 0;
+  const restEst = [null, null, null, null];
+  function mapOn() { return mapArmed || performance.now() < mapRepsUntil; }
+  function onLiveForMap(pctArr) {
+    if (mapOn()) return;
+    pctArr.forEach((v, i) => {
+      if (v == null || !isFinite(v)) return;
+      restEst[i] = restEst[i] == null ? v : restEst[i] + 0.1 * (v - restEst[i]); // ~2 s at 5 Hz
+    });
+  }
+  function mapLevel(i, v) {
+    const r = Math.max(0, Math.min(0.8, restEst[i] ?? 0));
+    return Math.max(0, Math.min(1, (v - r) / (1 - r)));
   }
 
   // ------------------------------------------------------------ live render loop
@@ -129,7 +146,8 @@
     });
     for (const arm of ["R", "L"]) meters[arm].classList.toggle("off", !activeArms.includes(arm));
     CH_INFO.forEach((c, i) => {
-      for (const p of mapShapes[`${c.muscle}/${c.side}`] || []) p.setAttribute("fill", heat(stale ? 0 : live[i] || 0));
+      const lvl = stale || !mapOn() || !activeArms.includes(i < 2 ? "R" : "L") ? 0 : mapLevel(i, live[i] || 0);
+      for (const p of mapShapes[`${c.muscle}/${c.side}`] || []) p.setAttribute("fill", heat(lvl));
     });
     requestAnimationFrame(frame);
   }
@@ -229,22 +247,22 @@
   function setSaturatedHint(arms) {
     for (const arm of ["R", "L"]) meters[arm].querySelector(".msat").classList.toggle("hidden", !(arms || []).includes(arm));
   }
+  // One pulse per working arm (a bilateral curl is ONE rep event): biceps green = clean,
+  // biceps amber = loose, front delt red = cheat. rep.arm only when the engine gave no arm_detail.
   function pulseMap(r) {
-    if (r.rep != null && (r.arm_detail || r.loose !== undefined)) { // live rep event: one pulse per arm, none for loose
-      for (const a of armVerdicts(r)) if (a.v !== "LOOSE") pulseArm({ arm: a.arm, cheat: a.v === "CHEAT" });
-      return;
-    }
-    pulseArm(r);
+    mapRepsUntil = performance.now() + 12000;
+    for (const a of armVerdicts(r)) pulseArm(a.arm, a.v);
   }
-  function pulseArm(r) {
-    const side = r.arm === "L" ? "left" : "right";
-    const key = r.cheat ? `front-deltoids/${side}` : `biceps/${side}`;
-    const cls = r.cheat ? "pulse-red" : "pulse-green";
+  function pulseArm(arm, v) {
+    const side = arm === "L" ? "left" : "right";
+    const key = v === "CHEAT" ? `front-deltoids/${side}` : `biceps/${side}`;
+    const cls = v === "CHEAT" ? "pulse-red" : v === "LOOSE" ? "pulse-amber" : "pulse-green";
     for (const p of mapShapes[key] || []) {
-      p.classList.remove("pulse-red", "pulse-green");
+      p.classList.remove("pulse-red", "pulse-green", "pulse-amber");
       void p.getBBox(); // restart the animation
       p.classList.add(cls);
-      setTimeout(() => p.classList.remove(cls), 1700);
+      clearTimeout(p._pulseT); // an older pulse's timer must not cut this one short
+      p._pulseT = setTimeout(() => p.classList.remove(cls), 1700);
     }
   }
 
@@ -354,8 +372,9 @@
     $("reviewScrub").value = String(reps.length - 1);
     // Start from each arm's last rep in the set.
     for (const arm of ["R", "L"]) {
-      const last = [...reps].reverse().find(r => r.arm === arm);
-      if (last) showMeter(arm, last.verdict.toUpperCase(), last.multiple, last.rep);
+      const last = [...reps].reverse().find(r => (r.arms?.length ? r.arms.some(a => a.arm === arm) : r.arm === arm));
+      const la = last && (last.arms?.find(a => a.arm === arm) ?? { verdict: last.verdict, multiple: last.multiple });
+      if (last) showMeter(arm, la.verdict.toUpperCase(), la.multiple, last.rep, la.multiple == null ? `Rep ${last.rep} · learning` : null);
       else { meters[arm].classList.remove("cheat", "loose", "clean"); meters[arm].querySelector(".verdict").textContent = "–"; meters[arm].querySelector(".mk").style.display = "none"; meters[arm].querySelector(".msub").textContent = "Not used"; }
     }
     scrubTo(reps.length - 1, false);
@@ -364,8 +383,9 @@
     const r = reviewSet?.rep_list[i];
     if (!r) return;
     $("reviewText").innerHTML = `Reviewing set ${reviewSet.set_no} · <b>rep ${r.rep}</b> ${r.arm === "L" ? "left" : "right"}`;
-    showMeter(r.arm, r.verdict.toUpperCase(), r.multiple, r.rep);
-    if (pulse) pulseMap({ arm: r.arm, cheat: r.verdict === "cheat" });
+    const arms = r.arms?.length ? r.arms : [{ arm: r.arm, verdict: r.verdict, multiple: r.multiple }];
+    for (const a of arms) showMeter(a.arm, a.verdict.toUpperCase(), a.multiple, r.rep, a.multiple == null ? `Rep ${r.rep} · learning` : null);
+    if (pulse) for (const a of arms) pulseArm(a.arm, a.verdict.toUpperCase());
   }
   $("reviewScrub").oninput = e => scrubTo(Number(e.target.value));
   function exitReview(restore = true) {
@@ -543,9 +563,11 @@
     }
     if (ss) {
       activeArms = s.set?.arms ?? ss.arms;
-      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "Calibrating…" : `Calibration ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "done" : "auto"}${ss.cal_problems?.length ? " (check)" : ""}${mvcText(ss.mvc)}`}</small>`;
+      $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "Calibrating…" : `Calibration ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "done" : "auto"}${ss.cal_problems?.length ? " (check)" : ""}`}</small>`;
+      $("who").title = ss.calibrating ? "" : mvcText(ss.mvc).replace(/^ · /, "");
     } else $("who").textContent = "No session";
     const armed = !!s.set && !ss?.calibrating;
+    mapArmed = armed || s.countdown_ms_left != null;
     if (s.countdown_ms_left != null) { $("armState").className = "armed"; $("armState").textContent = "Countdown · pick them up"; }
     else if (!loopTimer) {
       $("armState").className = armed ? "armed" : "idle";
@@ -553,8 +575,9 @@
     }
 
     if (s.set) {
-      $("setmeta").textContent = `${s.set.exercise} · ${s.set.variant}${s.set.load_lb != null ? ` · ${s.set.load_lb} lb` : ""} · ${s.set.arms.join(" + ")}`;
-    } else $("setmeta").textContent = ss?.calibrating ? "Calibrating…" : "Pick up the weights after the countdown.";
+      $("setmeta").textContent = `${s.set.exercise} · ${s.set.variant}${s.set.load_lb != null ? ` · ${s.set.load_lb} lb` : ""}${s.set.arms.length === 1 ? ` · ${s.set.arms[0] === "L" ? "left" : "right"} arm` : ""}`;
+      $("setmeta").title = $("setmeta").textContent;
+    } else $("setmeta").textContent = ss?.calibrating ? "Calibrating…" : "Lift after the countdown.";
     $("btnReplayStop").disabled = s.mode !== "replay";
     $("btnReplay").disabled = s.mode === "replay";
   }
@@ -772,6 +795,7 @@
   }
   $("liftsBtn").onclick = openLifts;
   if (location.hash === "#lifts") setTimeout(openLifts, 0);
+  window.addEventListener("hashchange", () => { if (location.hash === "#lifts") openLifts(); });
   setTimeout(refreshOutputs, 0);
 
   // ------------------------------------------------------------ audio diagnostics
@@ -805,11 +829,14 @@
     if (st.pending > 0 && st.busy_ms > 45000) return "voice queue stuck";
     return "";
   }
+  const SHORT_REASON = { "muted tab (?mute=1)": "muted tab", "Quiet mode": "quiet", "not the speaker tab": "other tab", "voice player not loaded": "no player",
+    "audio locked: click anywhere": "click to unlock", "player disabled": "off", "voice queue stuck": "stuck" };
   let lastReason = null;
   setInterval(() => {
     const r = silentReason();
     const el = $("audioStat");
-    el.textContent = r ? `audio: silent because ${r}` : "audio: ok";
+    el.textContent = r ? `audio: ${SHORT_REASON[r] || "off"}` : "audio: ok";
+    el.title = r ? `This tab is silent because: ${r}` : "This tab plays the coach's voice";
     el.classList.toggle("warn", !!r);
     if (r !== lastReason) { lastReason = r; dbg(r ? "silent" : "ok", r || null); }
   }, 1000);
@@ -926,7 +953,7 @@
     es.onmessage = ev => {
       let e; try { e = JSON.parse(ev.data); } catch { return; }
       switch (e.type) {
-        case "live": live = e.pct; liveAt = performance.now(); break;
+        case "live": live = e.pct; liveAt = performance.now(); onLiveForMap(e.pct); break;
         case "status": onStatus(e); break;
         case "hello": clientId = e.client_id; break;
         case "speaker": if (isSpeaker !== !!e.you) dbg("speaker", e.you ? "this tab" : "other tab"); isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; syncVoice(); renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); voiceTick(); break;

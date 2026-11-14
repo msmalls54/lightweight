@@ -18,18 +18,29 @@ const TRACKED: Record<string, number> = { "biceps/right": 0, "front-deltoids/rig
 const CH_LABEL = ["R biceps", "R front delt", "L biceps", "L front delt"];
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
+// Effort tint (neutral blue by %MVC). Red is only ever a cheat verdict, never effort.
 function heat(v: number, dark: boolean) {
   const t = Math.max(0, Math.min(1, v));
-  const a = dark ? [58, 64, 78] : [226, 222, 216], b = [229, 57, 53];
+  const a = dark ? [58, 64, 78] : [226, 222, 216], b = [61, 139, 253];
   return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`;
 }
 
-/** One entry per rep number; a rep is a cheat if either arm cheated. Shading = max peak over arms. */
+type Verdict = "clean" | "loose" | "cheat";
+/** Per working arm: the engine's arm verdicts when present (bilateral reps), else the rep's own arm. */
+function armsOf(r: RepView): { arm: "R" | "L"; verdict: Verdict; x: number | null }[] {
+  const a = r.arms ? Object.entries(r.arms).filter(([, d]) => d).map(([arm, d]) => ({ arm: arm as "R" | "L", verdict: d!.verdict, x: d!.shoulder_help_x })) : [];
+  return a.length ? a : [{ arm: r.arm, verdict: r.verdict, x: r.shoulder_help_x }];
+}
+const worst = (vs: Verdict[]): Verdict => (vs.includes("cheat") ? "cheat" : vs.includes("loose") ? "loose" : "clean");
+
+/** One entry per rep number; verdict = worst arm. Shading = max peak over arms. */
 function groupReps(reps: RepView[]) {
-  const m = new Map<number, { rep: number; cheat: boolean; peak: number[]; events: RepView[] }>();
+  const m = new Map<number, { rep: number; cheat: boolean; verdict: Verdict; arms: Partial<Record<"R" | "L", Verdict>>; peak: number[]; events: RepView[] }>();
   for (const r of reps) {
-    const g = m.get(r.rep) ?? { rep: r.rep, cheat: false, peak: [0, 0, 0, 0], events: [] };
-    g.cheat ||= r.cheat;
+    const g = m.get(r.rep) ?? { rep: r.rep, cheat: false, verdict: "clean" as Verdict, arms: {}, peak: [0, 0, 0, 0], events: [] };
+    for (const a of armsOf(r)) g.arms[a.arm] = a.verdict;
+    g.verdict = worst(Object.values(g.arms) as Verdict[]);
+    g.cheat ||= r.cheat || g.verdict === "cheat";
     g.peak = g.peak.map((v, i) => Math.max(v, r.raw_effort.peak_pct[i] ?? 0));
     g.events.push(r);
     m.set(r.rep, g);
@@ -37,14 +48,19 @@ function groupReps(reps: RepView[]) {
   return [...m.values()].sort((a, b) => a.rep - b.rep);
 }
 
-function Body({ values, dark, arms }: { values: number[]; dark: boolean; arms: string[] }) {
+const V_COLOR = { clean: "#2e9e5b", loose: "#d97706", cheat: "#e53935" };
+/** verdicts (rep view): biceps green/amber for a clean/loose arm, front delt red for a cheating arm. */
+function Body({ values, dark, arms, verdicts }: { values: number[]; dark: boolean; arms: string[]; verdicts?: Partial<Record<"R" | "L", Verdict>> }) {
   const untracked = dark ? "#2a2f3a" : "#d4d0ca", edge = dark ? "#11141a" : "#f6f3ee";
   return <svg viewBox="-6 -4 112 208" width="200" height="372" role="img" style={{ display: "block", flex: "none" }}
     aria-label={`Muscle map. ${CH_LABEL.map((l, i) => `${l} ${pct(values[i] ?? 0)}`).join(", ")}. Gray muscles are not measured.`}>
     {ANTERIOR.map((s, i) => {
       const ch = TRACKED[`${s.muscle}/${s.side}`];
       const used = ch !== undefined && arms.includes(ch < 2 ? "R" : "L");
-      return <polygon key={i} points={s.points} fill={ch === undefined ? untracked : used ? heat(values[ch] ?? 0, dark) : untracked}
+      const v = ch !== undefined ? verdicts?.[ch < 2 ? "R" : "L"] : undefined;
+      const isBi = ch !== undefined && ch % 2 === 0;
+      const vFill = v && used ? (v === "cheat" ? (isBi ? null : V_COLOR.cheat) : isBi ? V_COLOR[v] : null) : null;
+      return <polygon key={i} points={s.points} fill={ch === undefined ? untracked : !used ? untracked : vFill ?? heat(values[ch] ?? 0, dark)}
         stroke={ch === undefined ? edge : dark ? "#9aa3b5" : "#6b6258"} strokeWidth={ch === undefined ? 0.3 : 0.6} style={{ transition: "fill .3s" }} />;
     })}
     <text x="4" y="30" fontSize="9" fontWeight="700" fill={dark ? "#8a93a6" : "#7a7268"} textAnchor="middle">R</text>
@@ -83,7 +99,7 @@ function MuscleMap({ p, dark }: { p: Props; dark: boolean }) {
     </div>
 
     <div style={{ display: "flex", gap: 18, marginTop: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-      <Body values={values} dark={dark} arms={arms} />
+      <Body values={values} dark={dark} arms={arms} verdicts={view === "rep" && sel ? sel.arms : undefined} />
       <div style={{ flex: 1, minWidth: 260 }}>
         <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>{tab("rep", "Rep")}{tab("set", "Set")}{tab("session", "Session")}</div>
         <div style={{ fontSize: 12, color: dim, marginBottom: 6 }}>Raw effort, peak %MVC (context only) · {view === "rep" && sel ? `rep ${sel.rep}` : view === "set" ? `avg per rep, set ${s.set_no}` : "avg per rep, whole session"}</div>
@@ -101,17 +117,17 @@ function MuscleMap({ p, dark }: { p: Props; dark: boolean }) {
 
         <div style={{ fontSize: 12, color: dim, margin: "14px 0 6px" }}>Reps (tap to scrub)</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {reps.map((r, i) => <button key={r.rep} onClick={() => { setIdx(i); setView("rep"); }} title={r.cheat ? "delt took over" : "clean"} style={{
+          {reps.map((r, i) => <button key={r.rep} onClick={() => { setIdx(i); setView("rep"); }} title={r.verdict === "cheat" ? "delt took over" : r.verdict} style={{
             width: 36, height: 36, borderRadius: 8, fontWeight: 800, cursor: "pointer", color: "#fff",
-            background: r.cheat ? red : green, border: sel?.rep === r.rep && view === "rep" ? `3px solid ${fg}` : "3px solid transparent" }}>{r.rep}</button>)}
+            background: V_COLOR[r.verdict], border: sel?.rep === r.rep && view === "rep" ? `3px solid ${fg}` : "3px solid transparent" }}>{r.rep}</button>)}
         </div>
         {reps.length > 1 && <input type="range" min={0} max={reps.length - 1} value={Math.min(idx ?? reps.length - 1, reps.length - 1)}
           onChange={e => { setIdx(Number(e.target.value)); setView("rep"); }} style={{ width: "100%", marginTop: 8 }} aria-label="Rep scrubber" />}
         {sel && view === "rep" && <div style={{ marginTop: 8, fontSize: 14 }}>
-          {sel.events.map(e => <div key={e.arm}>
-            <b>Rep {e.rep}{arms.length > 1 ? ` ${e.arm === "R" ? "right" : "left"}` : ""}</b>: {e.shoulder_help_x !== null ? `${e.shoulder_help_x}× shoulder help vs your clean reps` : "learning your clean rep"}
-            {e.cheat ? <b style={{ color: red }}> · cheat: {e.reason}</b> : e.verdict === "loose" ? <span style={{ color: "#d97706" }}> · loose</span> : <span style={{ color: green }}> · clean</span>}
-          </div>)}
+          {sel.events.flatMap(e => armsOf(e).map(a => <div key={`${e.arm}-${a.arm}`}>
+            <b>Rep {e.rep}{arms.length > 1 ? ` ${a.arm === "R" ? "right" : "left"}` : ""}</b>: {a.x !== null ? `${a.x}× shoulder help vs your clean reps` : "learning your clean rep"}
+            {a.verdict === "cheat" ? <b style={{ color: red }}> · cheat{e.reason ? `: ${e.reason}` : ""}</b> : a.verdict === "loose" ? <span style={{ color: V_COLOR.loose }}> · loose</span> : <span style={{ color: green }}> · clean</span>}
+          </div>))}
         </div>}
         {s.coach_line && <div style={{ marginTop: 12, padding: "8px 12px", borderLeft: `3px solid #3d8bfd`, background: dark ? "#1c212c" : "#f0ece6", fontSize: 14 }}>{s.coach_line}</div>}
       </div>

@@ -5,7 +5,9 @@ import { cleanCoachLine, eventVerdict } from "./mcp/data.js";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-export interface WorkoutRep { rep: number; arm: "R" | "L"; cheat: boolean; verdict: "clean" | "loose" | "cheat"; multiple: number | null; reason: string | null }
+export interface WorkoutArm { arm: "R" | "L"; verdict: "clean" | "loose" | "cheat"; multiple: number | null }
+/** arms: every working arm of the rep (a bilateral curl is ONE rep event with two arms), from the engine. */
+export interface WorkoutRep { rep: number; arm: "R" | "L"; cheat: boolean; verdict: "clean" | "loose" | "cheat"; multiple: number | null; reason: string | null; arms?: WorkoutArm[] }
 export interface WorkoutSet {
   kind: "sensed"; set_id: string; session_id: string; started_at: string; ended_at: string | null; live: boolean;
   set_no: number; reps: number; clean: number; cheats: number; first_cheat_rep: number | null;
@@ -19,6 +21,16 @@ export function repVerdict(r: RepEvent): { multiple: number | null; verdict: Wor
   const up = r.up_delt_ratio, base = r.baseline_up_delt_ratio;
   const multiple = up != null && base != null && base > 0 ? r2(up / base) : null;
   return { multiple, verdict: eventVerdict(r) };
+}
+
+export function repArms(r: RepEvent): WorkoutArm[] | undefined {
+  if (!r.arm_detail) return undefined;
+  const out: WorkoutArm[] = [];
+  for (const arm of ["R", "L"] as const) {
+    const d = r.arm_detail[arm];
+    if (d) out.push({ arm, verdict: d.verdict, multiple: d.ref_up_delt_ratio && d.ref_up_delt_ratio > 0 ? r2(d.up_delt_ratio / d.ref_up_delt_ratio) : null });
+  }
+  return out.length ? out : undefined;
 }
 
 export function workoutToday(store: Store, person: string, activeSessionId?: string, liveSetId?: string) {
@@ -50,7 +62,7 @@ export function workoutToday(store: Store, person: string, activeSessionId?: str
       live: !end && row.set_id === liveSetId, set_no: 0, reps: byRep.size, clean: byRep.size - cheatReps.length, cheats: cheatReps.length,
       first_cheat_rep: cheatReps.length ? Math.min(...cheatReps) : null, decision: end?.decision ?? null, coach_line: cleanCoachLine(row.coach_line),
       detail: row.detail ? JSON.parse(row.detail) : null,
-      rep_list: reps.map(r => ({ rep: r.rep, arm: r.arm, cheat: r.cheat, reason: r.cheat_reason, ...repVerdict(r) })),
+      rep_list: reps.map(r => ({ rep: r.rep, arm: r.arm, cheat: r.cheat, reason: r.cheat_reason, ...repVerdict(r), arms: repArms(r) })),
     });
   }
   for (const l of store.loggedToday(person, since)) {
