@@ -379,3 +379,12 @@ test("a queued Gemini line waits behind a long browser line; identical line twic
   assert.deepEqual(log, ["browser:Every rep clean.", "play:gemini-say"]);
   assert.equal(live.max, 1);
 });
+
+
+test("backup with only rep-number clips cached is not a sentence -> browser voice instead", async () => {
+  const { A, log } = load();
+  A.coachText("r1", FULL, { clips: ["rep_4", "word_and", "rep_8", "missing_clip"] });
+  await A.coachAudio("r1", { ok: false });
+  await sleep(500);
+  assert.deepEqual(log, ["browser:" + LINE]);
+});

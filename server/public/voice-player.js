@@ -321,7 +321,11 @@
           });
         }),
       ).then(function (bufs) {
-        bufs = bufs.filter(Boolean);
+        // Only a real sentence counts: rep numbers / "and" alone ("Rep four. Rep eight.") say nothing.
+        var meaningful = (c.clips || []).some(function (k, i) {
+          return bufs[i] && !/^rep_\d+$|^word_and$/.test(k);
+        });
+        bufs = meaningful ? bufs.filter(Boolean) : [];
         if (bufs.length) {
           emit("clips", what);
           report(setId, "clips", Date.now() - c.t0, reason);
