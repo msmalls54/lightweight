@@ -39,7 +39,7 @@ test("fatigue drift: delt call-out from the first flagged rep, every cue key is 
   });
   const ctx = buildCoachContext({ person: "Mike", todaySets: [end], dataDir: DATA });
   assert.equal(await summarizeSet(ctx, end), fallbackSummary(end));
-  assert.match(fallbackSummary(end), new RegExp(`^From rep ${firstCheat} on, your right shoulder took over, [0-9]+ to [0-9]+ times harder`));
+  assert.match(fallbackSummary(end), new RegExp(`^From rep ${firstCheat} on, your right shoulder took over, [0-9]+ to [0-9]+ times its normal share`));
   setBrain(undefined);
 });
 
