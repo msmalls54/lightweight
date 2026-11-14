@@ -688,6 +688,19 @@
   };
   try { navigator.mediaDevices?.addEventListener?.("devicechange", () => { refreshOutputs(); }); } catch { /* ignore */ }
   window.LWAudioOut = { refresh: refreshOutputs, get current() { return audioOut; } };
+
+  // Lift library: a separate view (public/lifts.js), loaded only when opened. Off the live path.
+  function openLifts() {
+    $("settings").open = false;
+    if (window.LWLifts) return window.LWLifts.open();
+    const sc = document.createElement("script");
+    sc.src = "/public/lifts.js";
+    sc.onload = () => window.LWLifts?.open();
+    sc.onerror = () => toast("Lift library not available.");
+    document.head.appendChild(sc);
+  }
+  $("liftsBtn").onclick = openLifts;
+  if (location.hash === "#lifts") setTimeout(openLifts, 0);
   setTimeout(refreshOutputs, 0);
 
   // ------------------------------------------------------------ quiet mode
