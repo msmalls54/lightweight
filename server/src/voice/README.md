@@ -67,3 +67,15 @@ summarizeSession(ctx, { logged?: LoggedLift[], sets?: { set, lift }[] }) -> Prom
 `sets` defaults to `ctx.today.sets` + `ctx.today.setMeta`. Code computes the trend (cleaner/sloppier/steady over
 working sets of 3+ reps), fatigue (first cheat rep in 6+ rep sets), which arm cheats, the best set, and picks
 `focus_next`; Gemini phrases it. `answer(ctx, "how's my workout going?")` returns the `spoken` line.
+
+## Backup voice (Gemini TTS flaky)
+Set-end order: instant set-end clips -> the Gemini first sentence if it arrives within **4 s** of the coach text
+-> else a summary **stitched from cached Alnilam clips** (`buildClipSummary(set)`, pure code, <= 8 clips, e.g.
+"Rep four. And rep eight. Right shoulder took over. Stop at the first cheat next set. Rest longer.") -> browser
+speechSynthesis only if no clip is cached. One queue: never two voices.
+- `LW_SUMMARY_VOICE=auto|gemini|clips` (server env, default `auto`): `clips` forces the stitched summary (use it
+  if Gemini is down at demo time); `gemini` = the old 7 s browser fallback.
+- The server adds `...coachVoiceExtras(e)` (`{ clips, voice_mode }`) to its `coach` events; app.js passes them to
+  `LWAudio.coachText(setId, text, { clips, mode })`.
+- `npm run voice:warm`: generates every missing clip (retries with backoff) and lists what's still missing
+  (`--check` only reports). Exit code 1 if any clip is missing.

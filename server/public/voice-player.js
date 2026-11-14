@@ -15,7 +15,10 @@
 //   LWAudio.coachAudio(setId, msg)   the server's coach_audio event ({ok, text, fallback_clip}): plays the
 //                                    Gemini audio, unless the browser already spoke this set's line.
 //   LWAudio.cooldownMs = 3000        min gap between call-out starts
-//   LWAudio.fallbackMs = 7000        Gemini audio deadline before the browser voice takes over
+//   LWAudio.fallbackMs = 7000        Gemini audio deadline before the browser voice takes over (mode "gemini")
+//   LWAudio.clipFallbackMs = 4000    mode "auto": Gemini audio deadline before the stitched clip summary
+//   Coach line order (auto): set-end clips -> Gemini first sentence if it arrives within 4 s -> else the
+//   stitched clip summary (opts.clips) -> browser speechSynthesis only if no clip is cached.
 // ONE speech queue: clips, Gemini audio and browser speech never overlap (one lock, speechSynthesis
 // cancelled before each voice); a set's line is owned by Gemini OR the browser, never both; the same
 // line asked for twice within 15 s is spoken once.
@@ -294,11 +297,39 @@
       .then(decode);
   }
 
+  // Backup voice for a coach line: the stitched Alnilam clips (whatever is cached), else the browser.
+  function backupJob(c, what) {
+    return function () {
+      return Promise.all(
+        (c.clips || []).map(function (k) {
+          return loadClip(k).catch(function () {
+            emit("missing", k);
+            return null;
+          });
+        }),
+      ).then(function (bufs) {
+        bufs = bufs.filter(Boolean);
+        if (bufs.length) {
+          emit("clips", what);
+          return voice(bufs, "clips:" + what).then(function () {
+            return true;
+          });
+        }
+        return c.text ? browserSpeak(spokenPart(c.text), "browser:" + what) : false;
+      });
+    };
+  }
+  function browserJob(c, what) {
+    return function () {
+      return c.text ? browserSpeak(spokenPart(c.text), "browser:" + what) : Promise.resolve(false);
+    };
+  }
+
   /**
    * One spoken line: Gemini audio if it's decoded before `deadline` (ms since epoch), else the browser
    * voice. Exactly one of the two, decided once. `owner` (optional) is the per-set ownership record.
    */
-  function speakLine(text, audioP, deadline, owner, what) {
+  function speakLine(text, audioP, deadline, owner, what, fallback) {
     var winner = Promise.race([
       audioP.catch(function () {
         return null;
@@ -322,13 +353,14 @@
       audioP.then(function () {
         emit("skip_late", what);
       }, function () {});
-      return browserSpeak(text, "browser:" + what);
+      return fallback ? fallback() : browserSpeak(text, "browser:" + what);
     });
   }
 
   var LWAudio = {
     cooldownMs: 3000,
     fallbackMs: 7000,
+    clipFallbackMs: 4000, // auto mode: Gemini audio deadline before the stitched clip summary plays
     ready: null, // Promise: all clips preloaded
 
     /** Route every voice (clips, coach audio, say) to an output device; "" = system default. Returns a Promise. */
@@ -426,51 +458,66 @@
       }, "say");
     },
 
-    coachText: function (setId, text) {
+    /**
+     * The server's coach text arrived. opts.clips = the stitched backup summary (clip keys), opts.mode =
+     * "auto" | "gemini" | "clips" (server env LW_SUMMARY_VOICE). auto: Gemini audio if it comes within
+     * clipFallbackMs (4 s), else the clips (else the browser voice). clips: the clips right away.
+     * gemini: Gemini, else the browser voice after fallbackMs (7 s). Always exactly one voice.
+     */
+    coachText: function (setId, text, opts) {
       text = String(text || "").trim();
-      if (!setId || !text) return;
+      opts = opts || {};
+      var clips = Array.isArray(opts.clips) ? opts.clips.filter(Boolean) : [];
+      if (!setId || (!text && !clips.length)) return;
       var c = coach[setId];
       if (c) return; // already handled (duplicate event): never a second clock for the same set
-      c = coach[setId] = { text: text, by: null, timer: null, t0: Date.now() };
-      // If the Gemini audio hasn't arrived fallbackMs (7 s) after the text, the browser owns the line.
-      c.timer = setTimeout(function () {
-        if (c.by) return;
-        c.by = "browser";
-        emit("fallback", "coach:" + setId);
-        var spoken = spokenPart(text);
-        isRepeat(spoken);
-        enqueue(function () {
-          return browserSpeak(spoken, "browser:coach");
-        }, "coach:" + setId);
-      }, LWAudio.fallbackMs);
+      var mode = opts.mode === "gemini" || opts.mode === "clips" ? opts.mode : "auto";
+      // No backup clips (older server): auto behaves like "gemini" (7 s, then the browser voice).
+      if (mode === "auto" && !clips.length) mode = "gemini";
+      c = coach[setId] = { text: text, clips: clips, mode: mode, by: null, timer: null, t0: Date.now() };
+      // No text (the coach line failed) or clips forced: the backup voice now.
+      if (!text || mode === "clips") {
+        c.by = "backup";
+        enqueue(backupJob(c, "coach:" + setId), "coach:" + setId);
+        return;
+      }
+      c.timer = setTimeout(
+        function () {
+          if (c.by) return;
+          c.by = "backup";
+          emit("fallback", "coach:" + setId);
+          isRepeat(spokenPart(text));
+          enqueue(mode === "gemini" ? browserJob(c, "coach:" + setId) : backupJob(c, "coach:" + setId), "coach:" + setId);
+        },
+        mode === "gemini" ? LWAudio.fallbackMs : LWAudio.clipFallbackMs,
+      );
     },
 
     coachAudio: function (setId, msg) {
       msg = msg || {};
       var c = coach[setId];
       if (c && c.by) {
-        // The browser already took this line (or the audio came twice): drop it.
+        // The backup voice already took this line (or the audio came twice): drop it.
         emit("skip_late", "coach:" + setId);
         return Promise.resolve(false);
       }
       if (c) clearTimeout(c.timer);
       var text = (msg.spoken || (msg.text ? spokenPart(msg.text) : "") || (c ? spokenPart(c.text) : "")).trim();
-      if (!c) c = coach[setId] = { text: msg.text || text, by: null, timer: null, t0: Date.now() };
+      if (!c) c = coach[setId] = { text: msg.text || text, clips: [], mode: "auto", by: null, timer: null, t0: Date.now() };
       c.by = "gemini";
-      if (!text) return msg.fallback_clip ? LWAudio.playClip(msg.fallback_clip) : Promise.resolve(false);
-      if (isRepeat(text)) {
+      if (!text && !c.clips.length) return msg.fallback_clip ? LWAudio.playClip(msg.fallback_clip) : Promise.resolve(false);
+      if (text && isRepeat(text)) {
         emit("drop", "coach:repeat");
         return Promise.resolve(false);
       }
-      if (!msg.ok) return enqueue(function () {
-        return browserSpeak(text, "browser:coach");
-      }, "coach:" + setId);
+      var fallback = c.mode === "gemini" ? browserJob(c, "coach:" + setId) : backupJob(c, "coach:" + setId);
+      if (!msg.ok || !text) return enqueue(fallback, "coach:" + setId);
       // Server says the audio is cached: fetch it now; it still has to beat a short deadline.
       var deadline = Date.now() + 3000;
       var audioP = fetchSay(text);
       audioP.catch(function () {});
       return enqueue(function () {
-        return speakLine(text, audioP, deadline, null, "coach:" + setId);
+        return speakLine(text, audioP, deadline, null, "coach:" + setId, fallback);
       }, "coach:" + setId);
     },
 

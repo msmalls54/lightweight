@@ -11,7 +11,8 @@
     "build": "tsc --noEmit && mcp-use build --with-inspector --inline --no-typecheck",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "tunnel": "node scripts/tunnel.mjs"
+    "tunnel": "node scripts/tunnel.mjs",
+    "voice:warm": "tsx scripts/voice-warm.ts"
   },
   "dependencies": {
     "@google/genai": "3.3.0",

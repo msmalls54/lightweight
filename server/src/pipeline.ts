@@ -1,5 +1,5 @@
 // batch -> store -> engine.ingest -> events -> SSE (+ pickCue). Also sets, calibration and replay.
-import { Engine, pickCueSequence, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, summarizeSession, writeTodayHistory, speak, spokenPart,
+import { Engine, coachVoiceExtras, pickCueSequence, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, summarizeSession, writeTodayHistory, speak, spokenPart,
   type SessionSummary, type LoggedLift,
   type Arm, type Batch, type Calibration, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "./modules.js";
 import type { Store, SessionKind, EventRow } from "./store.js";
@@ -190,7 +190,7 @@ export class Pipeline {
       ctx = buildCoachContext({ person: sess.person, todaySets, setMeta });
     } catch (err) {
       console.error("[coach] context failed:", errMsg(err));
-      this.hub.send({ type: "coach", set_id: e.set_id, text: null, fallback_clip: fallback });
+      this.hub.send({ type: "coach", set_id: e.set_id, text: null, fallback_clip: fallback, ...coachVoiceExtras(e) });
       this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
       return;
     }
@@ -201,7 +201,7 @@ export class Pipeline {
       const text = await withTimeout(summarizeSet(ctx, e), 12_000);
       this.store.saveCoachLine(e.set_id, text);
       console.log(`[coach] ${sess.person} set ${e.set_id}: ${text}`);
-      this.hub.send({ type: "coach", set_id: e.set_id, text, fallback_clip: fallback, audio: "pending" });
+      this.hub.send({ type: "coach", set_id: e.set_id, text, fallback_clip: fallback, audio: "pending", ...coachVoiceExtras(e) });
       try {
         // Only the first sentence is spoken (④'s spokenPart); the full line stays on screen.
         const spoken = spokenPart(text);
@@ -213,7 +213,7 @@ export class Pipeline {
       }
     } catch (err) {
       console.error("[coach] summarizeSet failed:", errMsg(err));
-      this.hub.send({ type: "coach", set_id: e.set_id, text: null, fallback_clip: fallback });
+      this.hub.send({ type: "coach", set_id: e.set_id, text: null, fallback_clip: fallback, ...coachVoiceExtras(e) });
       this.hub.send({ type: "coach_audio", set_id: e.set_id, ok: false, fallback_clip: fallback });
     }
     await detail;

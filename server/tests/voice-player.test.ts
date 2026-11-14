@@ -11,9 +11,10 @@ interface Player {
   setMusic(el: { volume: number }): void;
   playClip(k: string | string[]): Promise<boolean>;
   say(text: string, opts?: { fallbackMs?: number }): Promise<boolean>;
-  coachText(setId: string, text: string): void;
+  coachText(setId: string, text: string, opts?: { clips?: string[]; mode?: string }): void;
   coachAudio(setId: string, msg: { ok?: boolean; text?: string; spoken?: string; fallback_clip?: string }): Promise<boolean>;
   fallbackMs: number;
+  clipFallbackMs: number;
   cooldownMs: number;
   ready: Promise<unknown>;
   isSpeaking(): boolean;
@@ -341,4 +342,76 @@ test("a missing clip in a sequence is skipped; the rest still plays", async () =
   assert.deepEqual(log, ["play:set_done"]);
   assert.ok(events.includes("missing:missing_clip"));
   assert.equal(await A.playClip(["missing_clip"]), false);
+});
+
+
+const CLIPS_R82 = ["rep_4", "word_and", "rep_8", "right_shoulder_took_over", "stop_first_cheat_next", "rest_longer"];
+const LINE = "Reps 4 and 8: right shoulder at 9 and 7 times normal, that's a swing.";
+
+test("auto: Gemini audio within 4 s -> Gemini only (clips never play)", async () => {
+  const { A, log, live } = load({ sayDelayMs: 1 });
+  assert.equal(A.clipFallbackMs, 4000);
+  A.clipFallbackMs = 150;
+  A.coachText("a1", LINE, { clips: CLIPS_R82, mode: "auto" });
+  await sleep(60);
+  await A.coachAudio("a1", { ok: true, text: LINE, spoken: LINE });
+  await sleep(300);
+  assert.deepEqual(log, ["play:gemini-say"]);
+  assert.equal(live.max, 1);
+});
+
+test("auto: no Gemini audio by 4 s -> the stitched Alnilam clips; late Gemini audio dropped", async () => {
+  const { A, log, live, events } = load({ sayDelayMs: 1, clipMs: 10 });
+  A.clipFallbackMs = 50;
+  A.coachText("a2", LINE, { clips: CLIPS_R82, mode: "auto" });
+  await sleep(150);
+  assert.equal(await A.coachAudio("a2", { ok: true, text: LINE }), false);
+  await sleep(600);
+  assert.deepEqual(log, CLIPS_R82.map((k) => "play:" + k)); // one voice job, back to back
+  assert.ok(events.includes("clips:coach:a2") && events.includes("skip_late:coach:a2"));
+  assert.equal(live.max, 1);
+});
+
+test("auto: clips missing too -> browser voice (first sentence), still one voice", async () => {
+  const { A, log, live } = load({ sayDelayMs: 1 });
+  A.clipFallbackMs = 30;
+  A.coachText("a3", LINE + " Next set, stop at the first cheat.", { clips: ["missing_clip"], mode: "auto" });
+  await sleep(500);
+  assert.deepEqual(log, ["browser:" + LINE]);
+  assert.equal(live.max, 1);
+});
+
+test("LW_SUMMARY_VOICE=clips: clips right away, Gemini audio ignored; gemini: old 7 s browser path", async () => {
+  const a = load({ sayDelayMs: 1, clipMs: 10 });
+  a.A.coachText("c1", LINE, { clips: ["rep_4", "right_shoulder_took_over"], mode: "clips" });
+  await sleep(10);
+  assert.equal(await a.A.coachAudio("c1", { ok: true, text: LINE }), false);
+  await sleep(300);
+  assert.deepEqual(a.log, ["play:rep_4", "play:right_shoulder_took_over"]);
+  const g = load({ sayDelayMs: 1 });
+  g.A.clipFallbackMs = 10;
+  g.A.fallbackMs = 120;
+  g.A.coachText("g1", LINE, { clips: CLIPS_R82, mode: "gemini" });
+  await sleep(60);
+  assert.deepEqual(g.log, []); // 4 s clip tier is off in gemini mode
+  await sleep(500);
+  assert.deepEqual(g.log, ["browser:" + LINE]);
+});
+
+test("coach line failed (no text) but clips sent -> the clips play", async () => {
+  const { A, log } = load({ clipMs: 10 });
+  A.coachText("n1", "", { clips: ["same_weight_keep_going"] });
+  await sleep(300);
+  assert.deepEqual(log, ["play:same_weight_keep_going"]);
+});
+
+test("set-end sequence, then the clip summary: in order, never overlapping", async () => {
+  const { A, log, live } = load({ clipMs: 40 });
+  await A.ready;
+  A.clipFallbackMs = 20;
+  A.playClip(["set_done", "two_cheats"]);
+  A.coachText("o1", LINE, { clips: ["rep_4", "rest_longer"] });
+  await sleep(1800); // two voice jobs, each with a 150 ms duck and a 400 ms restore
+  assert.deepEqual(log, ["play:set_done", "play:two_cheats", "play:rep_4", "play:rest_longer"]);
+  assert.equal(live.max, 1);
 });

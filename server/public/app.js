@@ -858,7 +858,8 @@
           if (e.too_short) break;
           if (!selectedSet) $("coach").textContent = e.text || "";
           // ④: the player starts a 7 s clock; if the server's audio isn't there by then, it speaks the text itself (one voice, never both).
-          if (e.audio === "pending" && e.text && !silent() && window.LWAudio?.coachText) LWAudio.coachText(e.set_id, e.text);
+          if (e.audio === "pending" && e.text && !silent() && window.LWAudio?.coachText) LWAudio.coachText(e.set_id, e.text, { clips: e.clips, mode: e.voice_mode });
+          if (!e.text && e.clips?.length && !silent() && window.LWAudio?.coachText) { LWAudio.coachText(e.set_id, "", { clips: e.clips }); loadWorkoutSoon(); loopAfterCoach(e.set_id); break; } // ④ backup voice
           loadWorkoutSoon();
           if (e.audio !== "pending") { // older servers: speak now
             if (e.text) say(e.text); else playClip(e.fallback_clip);

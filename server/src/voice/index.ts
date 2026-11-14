@@ -30,6 +30,20 @@ export const CLIPS: Record<string, string> = {
   // Instant set-end feedback (played right at set end while the summary TTS loads).
   all_clean: "Every rep clean.",
   no_cheats: "No cheat reps.",
+  // Backup voice: stitched set summaries from these clips when live TTS is late (coach/clips.ts).
+  word_and: "And",
+  right_shoulder_took_over: "Right shoulder took over.",
+  left_shoulder_took_over: "Left shoulder took over.",
+  both_shoulders_took_over: "Both shoulders took over.",
+  late_in_set: "Late in the set.",
+  from_the_start: "From the start.",
+  same_weight_keep_going: "Same weight, keep going.",
+  stop_first_cheat_next: "Stop at the first cheat next set.",
+  rest_longer: "Rest longer.",
+  slow_the_way_up: "Slow the way up.",
+  pin_your_elbows: "Pin your elbows.",
+  getting_cleaner: "Getting cleaner.",
+  getting_sloppier: "Getting sloppier.",
   a_bit_loose: "A bit loose. Tighten it up.",
   one_cheat: "One cheat rep.",
   two_cheats: "Two cheat reps.",
@@ -109,6 +123,9 @@ export interface InitVoiceOptions {
   synth?: Synth;
   /** Only generate these keys (smoke tests). Default: all CLIPS. */
   keys?: string[];
+  /** Tries per clip (default 2) and the first backoff in ms (doubles each retry, default 1500). */
+  attempts?: number;
+  backoffMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -143,17 +160,18 @@ export async function initVoice(opts: InitVoiceOptions): Promise<void> {
 
   const t0 = Date.now();
   await pool(todo, opts.concurrency ?? 4, async (key) => {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    const attempts = Math.max(1, opts.attempts ?? 2);
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
         const wav = trimSilence(await state.synth!(CLIPS[key]));
         fs.writeFileSync(clipPath(key), wav);
         manifest[key] = { text: CLIPS[key], voice, model: TTS_MODEL, trimmed: true };
         return;
       } catch (e) {
-        if (attempt === 2) {
+        if (attempt === attempts) {
           state.failed.push(key);
           log(`clip ${key} failed: ${(e as Error).message?.slice(0, 160)}`);
-        } else await sleep(1500);
+        } else await sleep((opts.backoffMs ?? 1500) * 2 ** (attempt - 1));
       }
     }
   });
@@ -174,6 +192,14 @@ export async function getClip(key: string): Promise<Buffer | null> {
   fs.mkdirSync(state.cacheDir, { recursive: true });
   fs.writeFileSync(f, wav);
   return wav;
+}
+
+/** Clip keys with no cached WAV yet. */
+export function missingClips(cacheDir = state.cacheDir): string[] {
+  return Object.keys(CLIPS).filter((k) => {
+    const f = path.join(cacheDir, `${k}.wav`);
+    return !(fs.existsSync(f) && fs.statSync(f).size > 44);
+  });
 }
 
 export function voiceStatus() {
