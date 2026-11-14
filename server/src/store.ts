@@ -53,6 +53,7 @@ export class Store {
         id INTEGER PRIMARY KEY, person TEXT NOT NULL, exercise TEXT NOT NULL, variant TEXT NOT NULL, load_lb REAL,
         sets INTEGER, reps INTEGER, note TEXT, logged_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS heartbeats (
         heartbeat_id INTEGER PRIMARY KEY, received_at TEXT NOT NULL, device TEXT NOT NULL, payload TEXT NOT NULL
       );
@@ -62,6 +63,11 @@ export class Store {
     if (!cols.includes("detail")) this.db.exec("ALTER TABLE sets ADD COLUMN detail TEXT");
   }
 
+  getSetting(key: string): string | null {
+    const r = this.db.prepare("SELECT value FROM settings WHERE key=?").get(key) as { value: string } | undefined;
+    return r?.value ?? null;
+  }
+  setSetting(key: string, value: string) { this.db.prepare("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value); }
   saveSetDetail(setId: string, detail: unknown) { this.db.prepare("UPDATE sets SET detail=? WHERE set_id=?").run(JSON.stringify(detail), setId); }
   /** A lift done without sensors (MCP log_exercise with reps): shows as "logged · not sensed". */
   logLift(l: { person: string; exercise: string; variant: string; load_lb?: number; sets?: number; reps?: number; note?: string }) {

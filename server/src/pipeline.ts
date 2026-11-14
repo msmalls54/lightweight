@@ -1,5 +1,5 @@
 // batch -> store -> engine.ingest -> events -> SSE (+ pickCue). Also sets, calibration and replay.
-import { Engine, pickCueSequence, pickSetEndCue, buildCoachContext, summarizeSet, summarizeSetDetail, writeTodayHistory, speak,
+import { Engine, pickCueSequence, pickSetEndCueSequence, buildCoachContext, summarizeSet, summarizeSetDetail, writeTodayHistory, speak,
   type Arm, type Batch, type Calibration, type EngineEvent, type RepEvent, type SetContext, type SetEndEvent, type Variant } from "./modules.js";
 import type { Store, SessionKind, EventRow } from "./store.js";
 import type { Hub } from "./hub.js";
@@ -84,7 +84,10 @@ export class Pipeline {
   private lastHb: (Heartbeat & { at: number }) | null = null;
   private statusTimer = setInterval(() => this.hub.send(this.status()), 1000);
 
-  constructor(private store: Store, private hub: Hub) { this.statusTimer.unref?.(); }
+  constructor(private store: Store, private hub: Hub) {
+    this.statusTimer.unref?.();
+    this.quiet = store.getSetting("quiet") === "1"; // Quiet mode survives a server restart
+  }
 
   get active() { return this.replay?.sess ?? this.live; }
 
@@ -153,8 +156,8 @@ export class Pipeline {
     if (e.calibration) this.applyRaised(sess, e.calibration);
     const nReps = new Set(e.reps.map(r => r.rep)).size;
     const short = nReps < MIN_REPS_FOR_SUMMARY;
-    let cue: string | null = null;
-    if (!short) try { cue = pickSetEndCue(e); } catch (err) { console.error("[coach] pickSetEndCue failed:", errMsg(err)); }
+    let cue: string[] | null = null;
+    if (!short) try { cue = pickSetEndCueSequence(e); } catch (err) { console.error("[coach] pickSetEndCueSequence failed:", errMsg(err)); }
     this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null, cue, n_reps: nReps, too_short: short });
     if (short) this.hub.send({ type: "coach", set_id: e.set_id, text: null, too_short: true, n_reps: nReps });
     else void this.coach(sess, e);
@@ -377,6 +380,7 @@ export class Pipeline {
   quiet = false;
   setQuiet(on: boolean) {
     this.quiet = on;
+    this.store.setSetting("quiet", on ? "1" : "0");
     this.hub.send({ type: "quiet", on });
     this.pushStatus();
     return { quiet: on };
