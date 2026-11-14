@@ -34,6 +34,8 @@ engine.setCalibration(cal2);                      // or: engine.raiseMvc([strict
 ```
 `setCalibration` rescales the clean references already learned this session (they're in %MVC), so the next set is judged consistently; tested on the Nov 14 right-arm file. Call it between sets. Over a whole set (rest samples included), p95 gives ~12,900 for that file; pass `percentile` 0.98–0.99 to get closer to the peaks.
 
+**Rest-only update (additive):** `engine.updateRest([r0, r1, r2, r3])` keeps the MVCs and replaces the rest levels (e.g. from idle samples before a set). NaN or > `restMax` entries keep the old value. The learned references are rescaled.
+
 Behavior worth knowing:
 - **Before calibration** pct uses rest 550 / MVC 14960. Calibration channels that fail the checks also fall back to those defaults, so a dead pad reads ~0 instead of garbage.
 - **Calibration math:** rest = median of the rest window. MVC = 95th percentile of that muscle's flex window. `pct = clamp((x-rest)/(mvc-rest), 0, 1.5)`. A channel is rejected if `mvc-rest < 1000` (dead/bad pad) or rest > 4000 (not relaxed, or the Link Shield is on RAW, which sits around 8150).
@@ -55,6 +57,11 @@ Signal = %MVC of the active arm's biceps (max of both when both arms are on).
 2. **Start:** the signal rises to `max(hi, valley + restartRise)` = max(0.35, valley + 0.2). The valley-relative part stops a lingering tail from starting a fake rep, and handles a too-low biceps MVC (FLEX hold < curls), which lifts the valleys between heavy reps to ~0.3. Within `minGapMs` (400 ms) of the last rep's end the start is *deferred*, not dropped: a rep that follows straight on still counts once the gap has passed.
 3. **End:** the signal drops below `max(lo, min(endLevelMax, endPeakFrac × rep peak))` = 30% of the peak, between 0.15 and 0.4. Hard reps end on the way down, so the slow envelope decay doesn't drag them out or split them.
 4. Windows shorter than `minRepMs` (400 ms, onset → end) are thrown away as twitches.
+5. **Not a curl → not a rep:** a window is also discarded if:
+   - it's longer than `maxRepMs` (4 s), or
+   - a working biceps stays ≥ 80% of its peak for > 1.5 s, or ≥ 50% for > 2.5 s (flex holds, raise holds), or
+   - its biceps peak is < 0.5 × the median of the set's reps so far (handling twitches).
+   Measured: real reps in all four recordings last ≤ 2.1 s and stay ≥ 50% of peak for ≤ 1.44 s; holds 2.15–4.2 s. Slow-tempo reps (1 s up, 2 s down) still count (synthetic sweep).
 
 Per rep: peak and mean %MVC for all 4 channels over the window. `up_ms` = onset → first sample ≥ 90% of biceps peak. `down_ms` = last sample ≥ 90% → end. `delt_share = delt_mean / (delt_mean + biceps_mean)` for that arm.
 
@@ -67,7 +74,9 @@ Every rep is judged against that arm's **clean reference**: up-phase delt/biceps
 **Why the up phase:** a swing fires the delt on the way *up* (it starts the weight). A strict heavy rep uses the delt mostly on the way *down*, to stabilize the shoulder. Whole-rep numbers mix the two, so strict and swing look alike under load. Nov 14 right arm, 35 lb: whole-rep share 0.35–0.46 strict vs 0.51–0.54 swing; up ratio 0.41–0.76 strict vs 1.04–1.31 swing.
 
 - **Reference:** once the arm has done 2 reps in the set, the per-feature *max* over the unflagged ones among them. Max, so a light warm-up rep 1 doesn't make rep 3 look like a cheat. Before that, the reference is the last clean reference from an earlier set **in the same session with the same exercise, variant and load**. Swinging from rep 1 is caught when a clean set came first. `baseline_delt_share` = the reference's share (null = no reference).
-- **No reference** (first reps of the session for that exercise): only blatant reps are flagged: up ratio > `fallbackUpRatio` (1.2, delt above the biceps on the way up) or delt share > `fallbackShareMax` (0.6). Never `delt_peak`, and never the whole-rep jump rules.
+- **No reference → no flag (default).** `flagWithoutReference: false`: with a stale or default calibration the first reps can't be judged fairly (live run 1). Set it to `true` to use the strong rules below. The cost: a set that swings from rep 1 with no clean set earlier in the session isn't caught until 2 plausible reps exist.
+- **The reference needs 2 plausible clean reps** (the first 2 that aren't blatant by the strong rules), so one odd movement (a flex hold, picking up the dumbbells) can't become the reference on its own.
+- **With `flagWithoutReference: true`** (first reps of the session for that exercise): only blatant reps are flagged: up ratio > `fallbackUpRatio` (1.2, delt above the biceps on the way up) or delt share > `fallbackShareMax` (0.6). Never `delt_peak`, and never the whole-rep jump rules.
 - **A reference must look clean:** a rep that would be blatant by those no-reference rules never becomes the reference. A session reference that turns blatant after an MVC raise is dropped. (Live run 1: a delt-led rep read up ratio 0.65 under MVC 5118, but 1.9 under the real MVC.)
 - **Main rule:** up ratio ≥ 1.35 × ref **and** ≥ ref + 0.15 → `"delt_share_jump"`.
 - `delt_share > ref + 0.15` → `"delt_share_jump"`. This is what fires on band curls: the delt is quiet on clean reps.
