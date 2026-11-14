@@ -2,21 +2,58 @@
 import type { Store, SessionRow, SetRow } from "../store.js";
 import type { RepEvent, SetEndEvent, SetContext, Arm } from "../modules.js";
 
+import { setFacts, upRatioX, labelRep, mentionsRawShare, scrubSnitch } from "../modules.js";
+
 const r2 = (x: number) => Math.round(x * 100) / 100;
+const r1 = (x: number) => Math.round(x * 10) / 10;
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const BI: Record<Arm, number> = { R: 0, L: 2 };
 
-export interface RepView { set_no: number; rep: number; arm: Arm; cheat: boolean; reason: string | null; delt_share: number; baseline_delt_share: number | null;
-  biceps_peak: number; delt_peak: number; biceps_mean: number; delt_mean: number; r_share: number | null; peak_pct: number[]; mean_pct: number[]; tempo_up_ms: number; tempo_down_ms: number }
+/** Said once in every tool result that carries raw numbers. */
+export const RAW_NOTE = "The cheat call uses shoulder help on the way up as a multiple of this person's clean reps (≥1.35× is a cheat, 1.2–1.35× loose). Raw effort (%MVC) is context only: under load the front delt often works at about half the biceps' level even on clean reps, so never call that 'the shoulders did half the work'.";
+
+export interface RepView {
+  set_no: number; rep: number; arm: Arm;
+  /** The lead numbers: verdict + up-phase shoulder help vs this person's clean reps (null until 2 reps set the reference). */
+  verdict: "clean" | "loose" | "cheat"; label: string; shoulder_help_x: number | null; reason: string | null; cheat: boolean;
+  /** Both biceps curled on this rep (else it says nothing about L/R balance). */
+  both_arms: boolean; r_share: number | null;
+  tempo_up_ms: number; tempo_down_ms: number;
+  raw_effort: { biceps_peak_pct: number; delt_peak_pct: number; biceps_mean_pct: number; delt_mean_pct: number; delt_share: number; peak_pct: number[]; mean_pct: number[] };
+}
+export interface Balance { r_share: number | null; reps_with_both_arms: number[]; verdict: string }
 export interface SetView { set_no: number; set_id: string; exercise: string; variant: string; load_lb: number | null; arms: Arm[]; finished: boolean;
-  reps: number; clean: number; cheats: number; first_cheat_rep: number | null; decision: string | null; coach_line: string | null; avg_delt_share: number | null; r_share: number | null }
+  reps: number; clean: number; cheats: number; first_cheat_rep: number | null; max_shoulder_help_x: number | null; decision: string | null;
+  coach_line: string | null; balance: Balance; r_share: number | null }
+
+const HI = 0.35; // engine rep threshold (DEFAULT_CONFIG.hi): a biceps "curled" on this rep at or above it
+const bothCurled = (r: RepEvent) => (r.peak_pct?.[0] ?? 0) >= HI && (r.peak_pct?.[2] ?? 0) >= HI;
+
+/** The ONE L/R balance rule (④'s setFacts): only reps where both biceps actually curled count. */
+export function balanceOf(reps: RepEvent[]): Balance {
+  const f = setFacts({ type: "set_end", set_id: "x", reps, clean: 0, cheats: 0, first_cheat_rep: null, decision: { next: "continue", reason: "" } } as SetEndEvent) as { balance?: { avg_r_share: number | null; reps_with_both_arms: number[]; verdict: string } | null };
+  const b = f.balance;
+  if (!b || b.avg_r_share == null) return { r_share: null, reps_with_both_arms: [], verdict: "one arm only: no balance" };
+  return { r_share: b.avg_r_share, reps_with_both_arms: b.reps_with_both_arms, verdict: b.verdict };
+}
+
+/** Coach lines stored before the wording fix: hide raw-share claims, reword "snitch". */
+export function cleanCoachLine(line: string | null): string | null {
+  if (!line) return null;
+  if (mentionsRawShare(line)) return null;
+  return scrubSnitch(line);
+}
 
 export function repView(setNo: number, r: RepEvent): RepView {
   const bi = BI[r.arm], de = bi + 1;
-  return { set_no: setNo, rep: r.rep, arm: r.arm, cheat: r.cheat, reason: r.cheat ? (r.cheat_reason === "delt_peak" ? "delt spike" : "delt took over") : null,
-    delt_share: r2(r.delt_share), baseline_delt_share: r.baseline_delt_share === null ? null : r2(r.baseline_delt_share),
-    biceps_peak: r2(r.peak_pct[bi]), delt_peak: r2(r.peak_pct[de]), biceps_mean: r2(r.mean_pct[bi]), delt_mean: r2(r.mean_pct[de]),
-    r_share: r.r_share === null ? null : r2(r.r_share), peak_pct: r.peak_pct.map(r2), mean_pct: r.mean_pct.map(r2), tempo_up_ms: Math.round(r.up_ms), tempo_down_ms: Math.round(r.down_ms) };
+  const x = upRatioX(r);
+  const verdict = r.cheat ? "cheat" : x != null && x >= 1.2 ? "loose" : "clean";
+  return { set_no: setNo, rep: r.rep, arm: r.arm, verdict, label: labelRep(r), shoulder_help_x: x == null ? null : r1(x), cheat: r.cheat,
+    reason: r.cheat ? (r.cheat_reason === "delt_peak" ? "shoulder spike" : "shoulder took over on the way up") : null,
+    both_arms: bothCurled(r), r_share: bothCurled(r) && r.r_share != null ? r2(r.r_share) : null,
+    tempo_up_ms: Math.round(r.up_ms), tempo_down_ms: Math.round(r.down_ms),
+    raw_effort: { biceps_peak_pct: r2(r.peak_pct[bi]), delt_peak_pct: r2(r.peak_pct[de]), biceps_mean_pct: r2(r.mean_pct[bi]), delt_mean_pct: r2(r.mean_pct[de]),
+      delt_share: r2(r.delt_share), peak_pct: r.peak_pct.map(r2), mean_pct: r.mean_pct.map(r2) } };
 }
 
 function setView(row: SetRow, reps: RepEvent[]): SetView {
@@ -25,11 +62,13 @@ function setView(row: SetRow, reps: RepEvent[]): SetView {
   const byRep = new Map<number, boolean>();
   for (const r of reps) byRep.set(r.rep, (byRep.get(r.rep) ?? false) || r.cheat);
   const cheatReps = [...byRep].filter(([, c]) => c).map(([n]) => n);
-  const rs = reps.map(r => r.r_share).filter((x): x is number => x !== null);
+  const xs = reps.map(upRatioX).filter((x): x is number => x != null);
+  const balance = balanceOf(reps);
   return { set_no: row.set_no, set_id: row.set_id, exercise: ctx.exercise, variant: ctx.variant, load_lb: ctx.load_lb ?? null, arms: ctx.arms, finished: !!end,
     reps: byRep.size, clean: byRep.size - cheatReps.length, cheats: cheatReps.length, first_cheat_rep: cheatReps.length ? Math.min(...cheatReps) : null,
-    decision: end?.decision ? `${end.decision.next}: ${end.decision.reason}` : null, coach_line: row.coach_line,
-    avg_delt_share: reps.length ? r2(avg(reps.map(r => r.delt_share))) : null, r_share: rs.length ? r2(avg(rs)) : null };
+    max_shoulder_help_x: xs.length ? r1(Math.max(...xs)) : null,
+    decision: end?.decision ? `${end.decision.next}: ${end.decision.reason}` : null, coach_line: cleanCoachLine(row.coach_line),
+    balance, r_share: balance.r_share };
 }
 
 /** Latest session that has at least one set (any kind, so a demo replay reads like live). */
@@ -57,7 +96,7 @@ export function getReps(store: Store, a: { session_id?: string; set_no?: number;
   const sets = d.sets.filter(s => a.set_no === undefined || s.view.set_no === a.set_no).map(s => ({
     ...s.view, rep_list: s.reps.map(r => repView(s.view.set_no, r)).filter(r => !a.only_cheats || r.cheat),
   }));
-  return { session: d.session, sets };
+  return { session: d.session, note: RAW_NOTE, sets };
 }
 
 /** Muscle-map payload: 4-channel %MVC for last rep / set / session, plus a per-rep scrubber. */
@@ -82,19 +121,17 @@ export function compareArms(store: Store, sessionId?: string) {
   const d = sessionDetail(store, sessionId);
   if (!d) return null;
   const rows = d.sets.filter(s => s.view.arms.length === 2 && s.reps.length).map(s => {
-    // Every rep event carries all 4 channels (a bilateral rep is ONE event labeled with the cheating arm).
-    const right = s.reps.filter(r => r.arm === "R"), left = s.reps.filter(r => r.arm === "L");
-    const rBi = avg(s.reps.map(r => r.mean_pct[0])), lBi = avg(s.reps.map(r => r.mean_pct[2]));
-    const share = rBi + lBi > 0 ? rBi / (rBi + lBi) : null;
-    return { set_no: s.view.set_no, exercise: s.view.exercise, r_biceps_mean: r2(rBi), l_biceps_mean: r2(lBi), r_share: share === null ? null : r2(share),
-      flagged: share !== null && (share < 0.4 || share > 0.6), weaker: share === null ? null : share < 0.5 ? "right" : share > 0.5 ? "left" : "even",
-      r_cheats: right.filter(r => r.cheat).length, l_cheats: left.filter(r => r.cheat).length };
+    const bal = s.view.balance;
+    const share = bal.r_share;
+    return { set_no: s.view.set_no, exercise: s.view.exercise, r_share: share, reps_with_both_arms: bal.reps_with_both_arms, verdict: bal.verdict,
+      flagged: share !== null && (share < 0.4 || share > 0.6),
+      r_cheats: s.reps.filter(r => r.cheat && r.arm === "R").length, l_cheats: s.reps.filter(r => r.cheat && r.arm === "L").length };
   });
-  const shares = rows.map(r => r.r_share).filter((x): x is number => x !== null);
-  const overall = shares.length ? r2(avg(shares)) : null;
-  return { session: d.session, sets: rows, overall_r_share: overall,
+  const overallBal = balanceOf(d.sets.filter(s => s.view.arms.length === 2).flatMap(s => s.reps));
+  const overall = overallBal.r_share;
+  return { session: d.session, sets: rows, overall_r_share: overall, overall_verdict: overallBal.verdict,
     weaker_arm: overall === null ? null : Math.abs(overall - 0.5) < 0.02 ? "even" : overall < 0.5 ? "right" : "left",
-    rule: "R share = R biceps mean / (R + L biceps mean), %MVC per arm's own calibration. Flag outside 0.40-0.60." };
+    rule: "Right share = right biceps / (right + left), only over reps where BOTH biceps actually curled; one-arm reps say nothing about balance. Flag outside 40-60%." };
 }
 
 export function compareCurls(store: Store, sessionId?: string) {
@@ -108,10 +145,8 @@ export function compareCurls(store: Store, sessionId?: string) {
   }
   const variants = [...by.values()].map(g => {
     const bi = g.reps.map(r => r.peak_pct[BI[r.arm]]);
-    const rs = g.reps.map(r => r.r_share).filter((x): x is number => x !== null);
     return { variant: g.variant, exercise: g.exercise, sets: g.sets, reps: g.reps.length, biceps_peak_pct_per_rep: r2(avg(bi)),
-      cheat_rate: g.reps.length ? r2(g.reps.filter(r => r.cheat).length / g.reps.length) : 0, avg_delt_share: r2(avg(g.reps.map(r => r.delt_share))),
-      r_share: rs.length ? r2(avg(rs)) : null };
+      cheat_rate: g.reps.length ? r2(g.reps.filter(r => r.cheat).length / g.reps.length) : 0, balance: balanceOf(g.reps) };
   }).sort((a, b) => b.biceps_peak_pct_per_rep - a.biceps_peak_pct_per_rep);
   return { session: d.session, variants,
     note: "Same session and calibration only. Hammer curls recruit the forearm, which is not sensed: lower biceps %MVC means less biceps, not 'forearm took over'." };
@@ -127,5 +162,5 @@ export function challengeStatus(store: Store) {
     { person: string; is_walkup: number; kind: string; reps: number; cheat_reps: number }[];
   return { players: rows.map(r => ({ person: r.person, walkup: !!r.is_walkup, reps: r.reps, cheats_caught: r.cheat_reps,
     clean_rate: r.reps ? r2((r.reps - r.cheat_reps) / r.reps) : null })),
-    rule: "The code flags a cheat when the front delt takes over (delt share jump over the first-2-rep baseline, or a delt spike). Beat it = finish 5 reps with zero flags." };
+    rule: "The code flags a cheat when the shoulder takes over on the way up (shoulder help at least 1.35x this person's clean reps). Beat it = finish 5 reps with zero flags." };
 }

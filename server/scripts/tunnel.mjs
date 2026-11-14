@@ -1,6 +1,6 @@
 // npm run tunnel: Cloudflare quick tunnel to the GATEWAY (127.0.0.1:3001), never to :3000.
 // Prints the private connector URL (https://<random>.trycloudflare.com/mcp?access_token=...) and saves the public
-// origin to server/.mcp-use/state/public-url.txt. Restart the server once afterwards so the muscle-map widget
+// origin to server/.cache/public-url.txt. Restart the server once afterwards so the muscle-map widget
 // loads its assets from the public origin. Ctrl-C stops the tunnel.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(serverDir, "..");
 const gatewayPort = Number(process.env.LW_GATEWAY_PORT) || 3001;
-const stateFile = resolve(serverDir, ".mcp-use", "state", "public-url.txt");
+// server/.cache survives restarts (mcp-use dev wipes .mcp-use/state); gitignored.
+const stateFile = resolve(serverDir, ".cache", "public-url.txt");
 
 function readToken() {
   if (process.env.LW_MCP_TOKEN) return process.env.LW_MCP_TOKEN;

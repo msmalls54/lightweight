@@ -1,6 +1,7 @@
 // Today's workout for the dashboard timeline: exercise blocks -> sets -> per-rep verdicts + stored report cards.
 import type { Store } from "./store.js";
 import type { RepEvent, SetContext, SetEndEvent } from "./modules.js";
+import { cleanCoachLine } from "./mcp/data.js";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -47,7 +48,7 @@ export function workoutToday(store: Store, person: string, activeSessionId?: str
     b.items.push({
       kind: "sensed", set_id: row.set_id, session_id: row.session_id, started_at: row.started_at, ended_at: row.ended_at,
       live: !end && row.set_id === liveSetId, set_no: 0, reps: byRep.size, clean: byRep.size - cheatReps.length, cheats: cheatReps.length,
-      first_cheat_rep: cheatReps.length ? Math.min(...cheatReps) : null, decision: end?.decision ?? null, coach_line: row.coach_line,
+      first_cheat_rep: cheatReps.length ? Math.min(...cheatReps) : null, decision: end?.decision ?? null, coach_line: cleanCoachLine(row.coach_line),
       detail: row.detail ? JSON.parse(row.detail) : null,
       rep_list: reps.map(r => ({ rep: r.rep, arm: r.arm, cheat: r.cheat, reason: r.cheat_reason, ...repVerdict(r) })),
     });

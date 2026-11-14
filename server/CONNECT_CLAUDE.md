@@ -15,7 +15,7 @@ The tunnel points at a **gateway on 127.0.0.1:3001**, never at the server on :30
    It prints the public origin and the **connector URL** `https://<random>.trycloudflare.com/mcp?access_token=…`.
    Keep that URL private: anyone with it can call the tools.
 3. Restart the server once (Ctrl-C, `npm run dev`) so the widget loads from the public origin
-   (the origin is saved in `server/.mcp-use/state/public-url.txt`).
+   (the origin is saved in `server/.cache/public-url.txt`; `LW_PUBLIC_URL` overrides it).
 4. claude.ai → Settings → Connectors → **Add custom connector** → paste the connector URL → Add.
 5. In a chat, enable the Lightweight connector and ask: *"Show my last set"*, *"Which rep did I cheat and which arm is weaker?"*,
    *"How's my workout so far?"*
