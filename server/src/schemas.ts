@@ -7,6 +7,8 @@ export const batchSchema = z.object({
   t0_ms: z.number().finite().min(0),
   dt_ms: z.number().finite().positive().max(1000),
   ch: z.array(z.array(sample).min(1).max(2000)).length(4),
+  /** Coalesced POST: this many consecutive firmware batches (seq .. seq+n_batches-1), ch concatenated in order. */
+  n_batches: z.number().int().min(1).max(100).optional(),
 }).refine(b => b.ch.every(c => c.length === b.ch[0].length), { message: "ch arrays must be equal length", path: ["ch"] });
 
 export const heartbeatSchema = z.object({

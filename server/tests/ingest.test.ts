@@ -1,0 +1,71 @@
+// Coalesced /ingest (firmware fix, Nov 14): several 40-sample batches in one POST, resends and overlaps
+// deduped by device time, fed to the engine in order, stored so replay still works.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { Hono } from "hono";
+import { Store } from "../src/store.js";
+import { Hub } from "../src/hub.js";
+import { Pipeline, trimIngested } from "../src/pipeline.js";
+import { addGuard, addReceiver } from "../src/receiver.js";
+
+const DT = 5;
+const sig = (i: number, c: number) => 600 + ((i * 7 + c * 13) % 50); // sample value from its global index
+function post(seq: number, firstSample: number, n: number, nBatches?: number) {
+  const ch = [0, 1, 2, 3].map(c => Array.from({ length: n }, (_, k) => sig(firstSample + k, c)));
+  return { device: "lw-uno-test", seq, t0_ms: 10_000 + firstSample * DT, dt_ms: DT, ch, ...(nBatches ? { n_batches: nBatches } : {}) };
+}
+
+test("trimIngested: new, full resend, partial overlap (seq advances by whole batches), device reboot", () => {
+  const b = post(10, 400, 400, 10); // samples 400..799, t0 12000, end 14000
+  assert.equal(trimIngested(b, null).batch, b);
+  assert.equal(trimIngested(b, 14_000).batch, null); // already have all of it
+  const t = trimIngested(b, 13_000).batch!; // have up to sample 599
+  assert.equal(t.ch[0].length, 200);
+  assert.equal(t.t0_ms, 13_000);
+  assert.equal(t.seq, 15); // 200 skipped = 5 batches of 40
+  assert.deepEqual(t.ch[1].slice(0, 3), [sig(600, 1), sig(601, 1), sig(602, 1)]);
+  const reboot = trimIngested(post(0, 0, 40), 500_000);
+  assert.equal(reboot.reset, true);
+  assert.equal(reboot.batch!.ch[0].length, 40);
+});
+
+test("/ingest: coalesced POSTs up to 400 samples, a repeated or overlapping POST never feeds samples twice", async () => {
+  const store = new Store(":memory:");
+  const hub = new Hub();
+  const sent: { type: string; t_ms?: number }[] = [];
+  hub.send = (e: object) => { sent.push(e as { type: string }); };
+  const pipeline = new Pipeline(store, hub);
+  const app = new Hono();
+  addGuard(app);
+  addReceiver(app, pipeline);
+  const send = async (body: unknown) => {
+    const r = await app.request("/ingest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { status: r.status, json: (await r.json()) as { ok?: boolean; duplicate?: boolean; error?: string } };
+  };
+
+  assert.deepEqual((await send(post(0, 0, 400, 10))).json, { ok: true, duplicate: false }); // samples 0..399
+  assert.deepEqual((await send(post(10, 400, 400, 10))).json, { ok: true, duplicate: false }); // 400..799
+  assert.deepEqual((await send(post(10, 400, 400, 10))).json, { ok: true, duplicate: true }); // the same POST again
+  assert.deepEqual((await send(post(15, 600, 400, 10))).json, { ok: true, duplicate: false }); // 600..999: only 800..999 new
+  assert.deepEqual((await send(post(25, 1000, 40))).json, { ok: true, duplicate: false }); // a plain 40-sample batch still works
+  const big = await send(post(26, 1040, 2000, 50)); // the largest allowed body (~50 KB) passes the body limit
+  assert.equal(big.status, 200, big.json.error);
+
+  // Stored in order, contiguous, every sample exactly once.
+  const sid = pipeline.active!.id;
+  const rows = store.batchesFor(sid).map(r => r.batch);
+  assert.deepEqual(rows.map(b => b.t0_ms), [10_000, 12_000, 14_000, 15_000, 15_200]);
+  const all = rows.flatMap(b => b.ch[2]);
+  assert.equal(all.length, 3040);
+  assert.ok(all.every((v, i) => v === sig(i, 2)), "stored samples are exactly the original signal");
+
+  // The engine saw them in order: live frames strictly increasing in device time, covering the whole span.
+  const live = sent.filter(e => e.type === "live").map(e => e.t_ms!);
+  assert.ok(live.length > 50);
+  assert.ok(live.every((t, i) => i === 0 || t > live[i - 1]), "live frames in order");
+  assert.ok(live[live.length - 1] >= 10_000 + 3000 * DT);
+
+  // Header lag: the device's newest sample vs receive time, relative to the best seen (all sent at once here).
+  const st = pipeline.status() as { device: { lag_ms: number | null } };
+  assert.equal(typeof st.device.lag_ms, "number");
+});

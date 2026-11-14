@@ -11,8 +11,13 @@ export interface SetTemplate { exercise: string; variant: Variant; load_lb?: num
 export const DEFAULT_SET: Omit<SetTemplate, "arms"> = { exercise: "dumbbell curl", variant: "standing", load_lb: 35, auto_next: false };
 /** Live run Nov 14: 10 s pauses split real sets, and 0.95 of a short flex under-read the biceps MVC.
  *  The engine also raises the MVC to p99 of each finished set (autoRaiseMvc, on by default). */
-// Hands-free sets (Nov 14): a set ends 8 s after the last rep, so putting the weights down ends it.
-export const ENGINE_CONFIG = { autoEndMs: 8_000, mvcPercentile: 0.99 } as const;
+// Hands-free sets: a set ends autoEndMs after the last rep, so putting the weights down ends it.
+// Nov 14 (s-1114-151942-af0): with 5-8 s of delivery lag, reps ~8-10 s apart auto-ended a set after 4 reps:
+// 15 s, and the dashboard shows "set ends in N s" once SET_IDLE_WARN_MS have passed without a rep.
+export const ENGINE_CONFIG = { autoEndMs: 15_000, mvcPercentile: 0.99 } as const;
+export const SET_IDLE_WARN_MS = 8_000;
+/** A device time this far behind the newest sample seen = the UNO rebooted (its clock restarted), not a resend. */
+const DEVICE_RESET_MS = 60_000;
 /** Start set = a voiced countdown ("Pick them up. Three, two, one, curl!"); the set arms when it ends. */
 export const COUNTDOWN_MS = 6000;
 export const MVC_PERCENTILE = 0.99;
@@ -75,6 +80,31 @@ interface Sess {
   /** When rest was last measured (countdown start), so arming a few seconds later doesn't re-measure it
    *  while the lifter is already holding the weights. */
   restTakenAt: number;
+  /** Device time (ms) of the current set's last rep end, for the "set ends in N s" warning. */
+  lastRepEndT?: number | null;
+}
+
+/** Per device: the newest sample time ingested (device ms), and the smallest receive-minus-device offset. */
+interface DeviceTrack { endT: number; minOffset: number; lagMs: number; at: number }
+
+/**
+ * Coalesced POSTs and resends: drop the part of a batch that was already ingested (by device time, so a
+ * repeated coalesced POST, or one that overlaps an earlier one, never feeds the same samples twice).
+ * Returns the remaining batch, null if nothing new, and whether the device clock restarted.
+ */
+export function trimIngested(b: Batch & { n_batches?: number }, endT: number | null): { batch: Batch | null; reset: boolean } {
+  const n = b.ch[0]?.length ?? 0;
+  const bEnd = b.t0_ms + n * b.dt_ms;
+  if (endT === null || n === 0) return { batch: n ? b : null, reset: false };
+  if (b.t0_ms < endT - DEVICE_RESET_MS && bEnd < endT - DEVICE_RESET_MS) return { batch: b, reset: true };
+  const skip = Math.max(0, Math.round((endT - b.t0_ms) / b.dt_ms));
+  if (skip >= n) return { batch: null, reset: false };
+  if (skip === 0) return { batch: b, reset: false };
+  const per = b.n_batches && b.n_batches > 1 ? n / b.n_batches : 0;
+  return {
+    batch: { ...b, seq: b.seq + (per ? Math.floor(skip / per) : 0), t0_ms: b.t0_ms + skip * b.dt_ms, ch: b.ch.map(c => c.slice(skip)) },
+    reset: false,
+  };
 }
 
 export class Pipeline {
@@ -93,22 +123,33 @@ export class Pipeline {
   get active() { return this.replay?.sess ?? this.live; }
 
   // ------------------------------------------------------------------ device input
-  ingest(b: Batch): { duplicate: boolean } {
+  private devices = new Map<string, DeviceTrack>();
+
+  ingest(b0: Batch & { n_batches?: number }): { duplicate: boolean; samples?: number } {
     // Guard: real hardware never feeds a fake-device session. A non-fake device with no open session,
     // or with a fake one open, gets a fresh live session for Mike (even while a replay is playing).
-    const realDevice = !b.device.startsWith("lw-fake");
+    const realDevice = !b0.device.startsWith("lw-fake");
     const sess = this.live && !(realDevice && this.live.kind !== "live")
       ? this.live
       : this.openSession({ person: "Mike", walkup: false, kind: realDevice ? "live" : "fake" });
+    const dev = this.devices.get(b0.device);
+    const { batch, reset } = trimIngested(b0, dev ? dev.endT : null);
+    if (!batch) return { duplicate: true };
+    const b: Batch = { device: batch.device, seq: batch.seq, t0_ms: batch.t0_ms, dt_ms: batch.dt_ms, ch: batch.ch };
     const id = this.store.saveBatch(sess.id, b);
     if (id === null) return { duplicate: true };
     sess.lastBatchId = id;
     const now = Date.now();
+    // Device lag = receive time - device time of the newest sample, relative to the smallest seen
+    // (the clocks' fixed offset cancels out). A reboot restarts the device clock: start over.
+    const endT = b.t0_ms + b.ch[0].length * b.dt_ms, offset = now - endT;
+    const minOffset = !dev || reset ? offset : Math.min(dev.minOffset, offset);
+    this.devices.set(b.device, { endT: Math.max(reset || !dev ? endT : dev.endT, endT), minOffset, lagMs: offset - minOffset, at: now });
     this.lastBatchWall = now;
     this.batchTimes.push(now);
     while (this.batchTimes.length && this.batchTimes[0] < now - 5000) this.batchTimes.shift();
     if (!this.replay) this.process(sess, b); // while a replay drives the dashboard, live batches are only stored
-    return { duplicate: false };
+    return { duplicate: false, samples: b.ch[0].length };
   }
 
   heartbeat(h: Heartbeat) {
@@ -121,12 +162,21 @@ export class Pipeline {
     let events: EngineEvent[];
     try { events = sess.engine.ingest(b); } catch (e) { console.error("[engine] ingest failed:", errMsg(e)); return; }
     for (const e of events) this.handle(sess, e);
+    this.setIdleTick(sess, b.t0_ms + b.ch[0].length * b.dt_ms);
+  }
+
+  /** Once SET_IDLE_WARN_MS pass without a rep, tell the dashboard when the engine will end the set (device time). */
+  private setIdleTick(sess: Sess, nowT: number) {
+    if (!sess.set || sess.lastRepEndT == null) return;
+    const idle = nowT - sess.lastRepEndT;
+    if (idle >= SET_IDLE_WARN_MS) this.hub.send({ type: "set_idle", set_id: sess.set.set_id, idle_ms: Math.round(idle), ends_in_ms: Math.max(0, Math.round(ENGINE_CONFIG.autoEndMs - idle)) });
   }
 
   private handle(sess: Sess, e: EngineEvent) {
     if (e.type === "live") this.hub.send(e);
-    else if (e.type === "rep") this.onRep(sess, e);
+    else if (e.type === "rep") { sess.lastRepEndT = e.end_ms; this.onRep(sess, e); }
     else if (e.type === "set_end") {
+      sess.lastRepEndT = null;
       const ctx = sess.set;
       sess.set = null;
       this.onSetEnd(sess, e, ctx);
@@ -553,7 +603,9 @@ export class Pipeline {
       for (let i = 0; i < batches.length && !rp.stop; i++) {
         const { batch_id, batch } = batches[i];
         if (i > 0) {
-          const gap = Math.max(0, Math.min(2000, batch.t0_ms - batches[i - 1].batch.t0_ms));
+          const prev = batches[i - 1].batch;
+          const prevDur = (prev.ch[0]?.length ?? 0) * prev.dt_ms; // a coalesced batch can span several seconds
+          const gap = Math.max(0, Math.min(Math.max(2000, prevDur + 200), batch.t0_ms - prev.t0_ms));
           target += gap / (rp.speed * (sess.calibrating ? 8 : 1)); // fast-forward through calibration
 
           const wait = t0 + target - performance.now();
@@ -583,6 +635,14 @@ export class Pipeline {
   }
 
   // ------------------------------------------------------------------ status
+  /** Lag of the most recently heard device (null when none in the last 10 s, or in replay). */
+  private deviceLag(now: number): number | null {
+    if (this.replay) return null;
+    let best: DeviceTrack | null = null;
+    for (const d of this.devices.values()) if (!best || d.at > best.at) best = d;
+    return best && now - best.at < 10_000 ? best.lagMs : null;
+  }
+
   status() {
     const s = this.active, now = Date.now();
     return {
@@ -591,6 +651,7 @@ export class Pipeline {
       device: {
         streaming: now - this.lastBatchWall < 2000,
         last_batch_age_ms: this.lastBatchWall ? now - this.lastBatchWall : null,
+        lag_ms: this.deviceLag(now),
         batches_per_s: Math.round((this.batchTimes.filter(t => t >= now - 5000).length / 5) * 10) / 10,
         heartbeat: this.lastHb ? { rssi: this.lastHb.rssi ?? null, queue: this.lastHb.queue ?? null, fw: this.lastHb.fw ?? null, uptime_ms: this.lastHb.uptime_ms ?? null, age_ms: now - this.lastHb.at } : null,
       },
