@@ -50,7 +50,12 @@ export function addDashboard(app: Hono<any, any, any>, pipeline: Pipeline, store
   });
   app.get("/muscle-map.json", c => sendFile(c, resolve(REPO_ROOT, "assets/muscle-map/anterior.json")));
 
-  app.get("/events", c => hub.connect(c.req.raw.signal, pipeline.snapshot(), { mute: c.req.query("mute") !== undefined }));
+  app.get("/events", c => hub.connect(c.req.raw.signal, pipeline.snapshot(), { mute: c.req.query("mute") !== undefined, visible: c.req.query("visible") !== "0" }));
+  app.post("/speaker/visibility", wrap(async c => {
+    const b = (await c.req.json().catch(() => ({}))) as { client_id?: unknown; visible?: unknown };
+    if (typeof b.client_id !== "string" || typeof b.visible !== "boolean" || !hub.setVisible(b.client_id, b.visible)) throw new HttpError(400, "Unknown dashboard.");
+    return { speaker: hub.speaker };
+  }));
   app.post("/speaker/claim", wrap(async c => {
     const b = (await c.req.json().catch(() => ({}))) as { client_id?: unknown };
     if (typeof b.client_id !== "string" || !hub.claim(b.client_id)) throw new HttpError(400, "Unknown or muted dashboard.");
