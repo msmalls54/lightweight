@@ -52,6 +52,7 @@ One lift family, done well: **curls**. Mike's real-life lift is the **preacher c
 > - **Rest baseline ≈ 500–600** per channel; ENV ceiling ≈ **14,960** (saturation). Biceps hard flex saturates at current gain: consider a gain turn-down (pot is likely under the Link Shield) or rely on calibration.
 > - **Link Shield output switch is easy to misread.** A channel sitting flat at **~8,150 (half-scale)** = it's on RAW, not ENV. Slide the switch to the other end.
 > - **Delt placement:** 2 finger-widths below the bony shoulder tip, on the bulge, pointing down the arm. Too close to the collarbone = almost no signal. Current spot reads side raise (10,131) > front raise (7,412), so it sits toward the middle delt; it still catches the swing.
+> - **Left side verified Nov 14 (venue):** L biceps (A2) curls avg 5,294, hard flex 13,384 (saturates like the right); L front delt (A3) strict curls ≈ 670 vs swing curls ≈ 7,000 (10× jump), front raise 11,817. The L biceps Link Shield had been on the wrong output mode (rectified-looking: rest ≈ 10, thin spikes < 1,000); switching to ENV fixed it. **Symptom → cause:** flat ≈ 8,150 = RAW; near-zero with thin spikes = not ENV either; check the switch first.
 > - Envelope decays slowly after a hard rep (relax phases right after flexing read high for 1–2 s). Rep-end hysteresis must allow for it.
 
 ### Channel map (label the cables!)
@@ -132,6 +133,7 @@ Reference repo for patterns (copy structure, not hit logic): `github.com/msmalls
 
 ## Agent (Gemini)
 - **Brain = Gemini 4 Hydrogen** (decided Nov 14: Google's fast, low-latency Gemini 4 model, built for agentic/high-throughput work; cheaper and faster than Gemini 4 Carbon). Get the exact model ID from `ai.models.list()` with our key or AI Studio; don't guess the string. Put it in one config constant.
+- **Verified with our key (Nov 14):** brain = `gemini-4-hydrogen` with thinkingLevel LOW (≈2.4–3.1 s per answer; MINIMAL is rejected), fallback `gemini-3.8-flash`. TTS = `gemini-3.8-flash-lite-tts` (≈2.2 s per clip), fallback `gemini-3.8-flash-tts`, voice "Algenib". **Gotcha:** `generateContent` + `speechConfig` now returns 400; TTS works only via `ai.interactions.create` on apiVersion `v1beta`, and TTS models don't appear in `models.list()`. All in `server/src/voice/models.ts`.
 - **Voice = a Gemini TTS model**, separate from Hydrogen (Hydrogen is text-only). Prefer the low-latency **`gemini-3.8-flash-lite-tts`**; fall back to `gemini-3.8-flash-tts` or whatever TTS ID the key accepts.
 - Inputs: structured rep/set records from SQLite. Output: one-line cue or short summary. Tone: blunt gym coach, no medical language.
 - Q&A examples it must handle: "How was that set?", "Which rep did I cheat?", "Which arm is weaker?", "Compare my last two sets."
