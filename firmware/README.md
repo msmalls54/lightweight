@@ -11,10 +11,11 @@
 
 ## How it works
 - **Sampling** runs in a hardware timer interrupt (FspTimer, 200 Hz, IRQ priority 14). WiFiS3 calls block `loop()` (they're AT commands over a UART to the ESP32-S3), but they can't delay a sample. ISR ≈ 100 µs. 14-bit `analogRead`, then an EMA with a ~50 ms time constant (alpha 0.095).
-- **Batches:** 40 samples = 200 ms. `POST /ingest {"device":"lw-uno-1","seq","t0_ms","dt_ms":5,"ch":[[40],[40],[40],[40]]}`. `t0_ms` = `millis()` of the first sample.
+- **Batches:** 40 samples = 200 ms. `POST /ingest {"device":"lw-uno-1","seq","t0_ms","dt_ms":5,"n_batches":k,"ch":[[40k],[40k],[40k],[40k]]}`. `t0_ms` = `millis()` of the first sample.
+- **Coalescing (fw 0.2.0):** everything pending goes out oldest first, up to 8 batches (320 samples) per POST, `seq` = the first batch's seq. Live that's 1–2 per POST; after an outage it's 8 until caught up. A retry resends the identical group. Bodies are streamed in 1.4 KB writes (an 8-batch body is ~6 KB, more than free RAM), with a dry-run pass for Content-Length. The bottleneck is the 115,200-baud UART to the ESP32-S3: ~70–80 ms per batch of JSON, plus a fixed ~50–120 ms per POST (reply, AT round trips, Wi-Fi). Coalescing amortizes the fixed part. Request headers are just Host + Content-Length.
 - **Offline queue:** the sample ring is the queue. `loop()` always sends the oldest unacked batch and only moves on after HTTP 200, so a resend keeps its `seq` and order is preserved. Holds **43 batches = 8.6 s** (RAM limit: the core reserves 8 KB heap + 1 KB stack; samples are packed 7 bytes each to fit). Beyond that the oldest are dropped and counted. A 4xx reply skips that batch (resending won't help); timeouts and 5xx retry with backoff 250 ms → 2 s.
 - **seq across reboots:** `seq = bootCount × 1,000,000 + batchIndex`, with the boot counter in EEPROM, so a reboot never reuses a seq the server already saw (the server ignores duplicates). A reboot looks like a big forward seq jump plus `uptime_ms`/`t0_ms` going back to ~0.
-- **Heartbeat** every 2 s: `POST /heartbeat {"device","seq","uptime_ms","rssi","queue","fw":"0.1.0","dropped"}`. `seq` = newest captured batch. `dropped` (extra field) = batches dropped since boot.
+- **Heartbeat** every 2 s: `POST /heartbeat {"device","seq","uptime_ms","rssi","queue","fw":"0.2.0","dropped","post_rtt_ms","post_rtt_max_ms","coalesce_max","posts","batches"}`. `seq` = newest captured batch, `dropped` = batches dropped since boot; the last five cover the ~2 s since the previous heartbeat (last/max /ingest round-trip, max batches per POST, POST count, batches delivered).
 - **HTTP/1.1 keep-alive** to `LAPTOP_IP:3000`; header + body go out in one AT send. Any error closes the socket and reconnects. Wi-Fi rejoins forever (8 s per attempt).
 - **No LED matrix** (the shield covers it).
 - **Serial 115200:** a plotter line every 100 ms (`rbi:… rdelt:… lbi:… ldelt:… q:…`) and every 5 s a status line:
@@ -37,6 +38,13 @@ Expect ~69 KB flash, ~22.5 KB globals. Above ~23.2 KB the link fails (heap reser
 ```bash
 arduino-cli upload -p COM8 --fqbn arduino:renesas_uno:unor4wifi firmware/lightweight
 ```
+
+## Verify against the real server (read-only)
+From the main checkout root, after a few minutes of streaming:
+```bash
+node firmware/tools/verify_stream.mjs --minutes 5
+```
+It checks the server's SQLite for continuity in device time (each stored batch starts where the previous ended), samples/s (should be 200), POSTs/s, batches per POST, and prints the latest heartbeat.
 
 ## Test without the real server
 Laptop on the "iPhone (99)" hotspot, then:
