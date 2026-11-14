@@ -13,6 +13,8 @@
 //    seq the server already saw (it ignores duplicate seqs).
 //  - HTTP/1.1 keep-alive to the laptop; reconnect on any error. Wi-Fi retries forever.
 //  - Serial 115200: 10 Hz plotter line (4 values + queue depth) and a "# ..." status every 5 s.
+//    On the R4 WiFi, Serial is a UART bridged by the ESP32-S3 (not native USB): writes block
+//    ~87 us/byte (only loop(), never the sampler) and availableForWrite() always returns 0.
 //
 // Wire format (BUILD.md, do not change):
 //   POST /ingest    {"device":"lw-uno-1","seq":N,"t0_ms":T,"dt_ms":5,"ch":[[..40..],[..],[..],[..]]}
@@ -111,6 +113,7 @@ static uint32_t lastSerialLineMs = 0, lastStatusMs = 0, lastWifiCheckMs = 0;
 static uint32_t startMicros = 0;
 static bool wifiUp = false;
 static int32_t lastRssi = 0;
+static int lastErr = 0;          // last non-200 result from httpPost (negative = transport error)
 
 static WiFiClient client;
 static bool sockOpen = false;
@@ -121,7 +124,7 @@ static const uint16_t HDR_RESERVE = 192;
 static char tx[HDR_RESERVE + 1100];
 static char *const body = tx + HDR_RESERVE;
 static const uint16_t BODY_MAX = sizeof(tx) - HDR_RESERVE;
-static char resp[200];     // first bytes of the HTTP response (status line + headers)
+static char resp[64];      // one HTTP response header line (lowercased, truncated)
 static uint8_t rchunk[128];
 
 // ---------- helpers ----------
@@ -184,8 +187,9 @@ static void closeSock() {
   sockOpen = false;
 }
 
-static void netFailed() {
+static void netFailed(int code) {
   failedPosts++;
+  lastErr = code;
   closeSock();
   nextNetAttemptMs = millis() + backoffMs;
   backoffMs = min<uint32_t>(backoffMs * 2, 2000);
@@ -216,36 +220,40 @@ static int httpPost(const char *path, size_t len) {
   uint32_t t = millis();
   if (client.write((const uint8_t *)start, hlen + len) != hlen + len) return -3;
 
-  // Read the full response (headers + Content-Length body) so keep-alive stays in sync.
-  size_t kept = 0, total = 0, hdrEnd = 0;
-  long contentLen = -1;
-  bool closeAfter = false;
-  int status = -4;  // timeout
+  // Read the full response so keep-alive stays in sync. Headers are parsed line by line, so
+  // any header length works (the real server sends ~230 bytes of headers incl. CORS).
+  size_t lineLen = 0;
+  bool gotStatus = false, inBody = false, closeAfter = false;
+  long contentLen = -1, bodyRead = 0;
+  int status = -6;  // garbage status line
   while (millis() - t < RESP_TIMEOUT_MS) {
     int a = client.available();
     if (a <= 0) continue;
     int r = client.read(rchunk, min(a, (int)sizeof(rchunk)));
     if (r <= 0) continue;
-    for (int i = 0; i < r && kept < sizeof(resp) - 1; i++) resp[kept++] = (char)rchunk[i];
-    resp[kept] = 0;
-    total += r;
-    if (!hdrEnd) {
-      char *e = strstr(resp, "\r\n\r\n");
-      if (!e) {
-        if (kept >= sizeof(resp) - 1) { status = -5; break; }  // headers too long
-        continue;
+    for (int i = 0; i < r; i++) {
+      char c = (char)rchunk[i];
+      if (inBody) { bodyRead++; continue; }
+      if (c == '\r') continue;
+      if (c != '\n') { if (lineLen < sizeof(resp) - 1) resp[lineLen++] = (char)tolower(c); continue; }
+      resp[lineLen] = 0;
+      if (!gotStatus) {
+        gotStatus = true;
+        if (strncmp(resp, "http/1.", 7) == 0) status = atoi(resp + 9);
+      } else if (lineLen == 0) {
+        inBody = true;
+        if (contentLen < 0) closeAfter = true;  // can't frame the body: don't reuse the socket
+      } else if (strncmp(resp, "content-length:", 15) == 0) {
+        contentLen = atol(resp + 15);
+      } else if (strncmp(resp, "connection:", 11) == 0 && strstr(resp, "close")) {
+        closeAfter = true;
       }
-      hdrEnd = (e - resp) + 4;
-      status = (strncmp(resp, "HTTP/1.", 7) == 0) ? atoi(resp + 9) : -6;
-      for (char *q = resp; q < e; q++) *q = tolower(*q);
-      char *cl = strstr(resp, "content-length:");
-      if (cl) contentLen = atol(cl + 15);
-      if (strstr(resp, "connection: close")) closeAfter = true;
-      if (contentLen < 0) closeAfter = true;  // can't frame the body: don't reuse the socket
+      lineLen = 0;
     }
-    if (contentLen < 0 || total >= hdrEnd + (size_t)contentLen) break;
+    if (inBody && (contentLen < 0 || bodyRead >= contentLen)) break;
   }
-  if (!hdrEnd) return status;
+  if (!inBody) return -4;  // timeout before the headers ended
+  if (contentLen >= 0 && bodyRead != contentLen) closeAfter = true;  // out of sync: start fresh
   uint32_t rtt = millis() - t;
   rttSumMs += rtt; rttCount++;
   if (rtt > rttMaxMs) rttMaxMs = rtt;
@@ -306,7 +314,7 @@ static bool ensureWifi() {
 // ---------- serial ----------
 static void serialOut() {
   uint32_t now = millis();
-  if (now - lastSerialLineMs >= SERIAL_LINE_MS && Serial.availableForWrite() >= 64) {
+  if (now - lastSerialLineMs >= SERIAL_LINE_MS) {
     lastSerialLineMs = now;
     uint32_t n = samplesNow();
     if (n) {
@@ -322,7 +330,7 @@ static void serialOut() {
       Serial.write((const uint8_t *)line, p - line);
     }
   }
-  if (now - lastStatusMs >= SERIAL_STATUS_MS && Serial.availableForWrite() >= 200) {
+  if (now - lastStatusMs >= SERIAL_STATUS_MS) {
     lastStatusMs = now;
     noInterrupts();
     uint32_t n = sampleCount, gmax = tickMaxGapUs, gmin = tickMinGapUs, imax = isrMaxUs;
@@ -331,10 +339,10 @@ static void serialOut() {
     uint32_t expected = (micros() - startMicros) / 5000;
     char line[256];
     snprintf(line, sizeof(line),
-             "# wifi=%d rssi=%ld sent=%lu fail=%lu drop=%lu hb=%lu conn=%lu q=%lu "
+             "# wifi=%d rssi=%ld sent=%lu fail=%lu err=%d drop=%lu hb=%lu conn=%lu q=%lu "
              "rtt_avg=%lums rtt_max=%lums samples=%lu expected~%lu tick_us=%lu..%lu isr_max=%luus\r\n",
              wifiUp ? 1 : 0, (long)lastRssi, (unsigned long)sentBatches, (unsigned long)failedPosts,
-             (unsigned long)droppedBatches, (unsigned long)heartbeatsOk, (unsigned long)reconnects,
+             lastErr, (unsigned long)droppedBatches, (unsigned long)heartbeatsOk, (unsigned long)reconnects,
              (unsigned long)(n / BATCH_N - nextSend),
              (unsigned long)(rttCount ? rttSumMs / rttCount : 0), (unsigned long)rttMaxMs,
              (unsigned long)n, (unsigned long)expected,
@@ -392,7 +400,7 @@ void loop() {
     size_t len = buildHeartbeat();
     int st = httpPost("/heartbeat", len);
     if (st == 200) { heartbeatsOk++; backoffMs = 250; }
-    else { netFailed(); return; }
+    else { netFailed(st); return; }
   }
 
   // Oldest unacked batch.
@@ -411,7 +419,7 @@ void loop() {
       nextSend++;
       droppedBatches++;
     } else {
-      netFailed();
+      netFailed(st);
     }
   }
 }
