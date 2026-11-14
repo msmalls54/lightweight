@@ -29,6 +29,8 @@ export const CLIPS: Record<string, string> = {
   set_done: "Set's done.",
   // Instant set-end feedback (played right at set end while the summary TTS loads).
   all_clean: "Every rep clean.",
+  no_cheats: "No cheat reps.",
+  a_bit_loose: "A bit loose. Tighten it up.",
   one_cheat: "One cheat rep.",
   two_cheats: "Two cheat reps.",
   three_cheats: "Three cheat reps.",

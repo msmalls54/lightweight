@@ -34,7 +34,17 @@ const median = (xs: number[]): number | null => {
 const pct = (x: number | null) => (x == null ? null : Math.round(x * 100));
 const side = (a: Arm) => (a === "R" ? "right" : "left");
 
-export type RepLabel = "big_swing" | "mild_cheat" | "cheat" | "near_miss" | "clean";
+export type RepLabel = "big_swing" | "mild_cheat" | "cheat" | "loose" | "near_miss" | "clean";
+
+/**
+ * The engine's "loose" verdict: the shoulder crept up with fatigue, NOT a cheat. Engine cheats win;
+ * otherwise rep.loose or any arm's arm_detail verdict "loose".
+ */
+export function isLoose(r: RepEvent): boolean {
+  if (r.cheat) return false;
+  if (r.loose) return true;
+  return Object.values(r.arm_detail ?? {}).some((d) => d?.verdict === "loose");
+}
 
 /** Up-phase delt ratio as a multiple of the clean reference (null before a reference exists). */
 export function upRatioX(r: RepEvent): number | null {
@@ -46,6 +56,7 @@ export function upRatioX(r: RepEvent): number | null {
 export function labelRep(r: RepEvent): RepLabel {
   const x = upRatioX(r);
   if (r.cheat) return x == null ? "cheat" : x >= DETAIL_CONFIG.bigSwingX ? "big_swing" : "mild_cheat";
+  if (isLoose(r)) return "loose"; // the engine's verdict: not a cheat
   return x != null && x >= DETAIL_CONFIG.nearMissX ? "near_miss" : "clean";
 }
 
@@ -157,6 +168,10 @@ export function setFacts(set: SetEndEvent, variant?: Variant) {
     big_swing_reps: byLabel("big_swing"),
     mild_cheat_reps: byLabel("mild_cheat"),
     near_miss_reps: byLabel("near_miss"),
+    /** The engine's "loose" reps: shoulder crept up with fatigue; counted clean, not cheats. */
+    loose_reps: byLabel("loose"),
+    /** Arms whose front-delt sensor read maxed out on most clean reps (pad placement / gain). */
+    delt_saturated: set.delt_saturated ?? [],
     first_cheat_rep: set.first_cheat_rep,
     cheat_pattern,
     worst_rep: worst ? { rep: worst.rep, arm: worst.arm, up_delt_x_clean: worst.up_delt_x_clean } : null,
@@ -189,6 +204,8 @@ const RAW_KEYS = new Set([
   "delt_share", "delt_peak_pct", "delt_peak_pct_mvc", "up_delt_ratio", "clean_reference_up_delt_ratio",
   "mean_clean_up_delt_ratio", "avg_delt_share", "avg_delt_share_clean_reps", "avg_delt_share_cheat_reps",
   "baseline_delt_share", "baseline_up_delt_ratio", "down_ms",
+  // Card-only sensor hint: the code adds that bullet itself; never in a spoken line.
+  "delt_saturated",
 ]);
 
 const CHEAT_REASON_WORDS: Record<string, string> = { delt_share_jump: "shoulder_took_over", delt_peak: "shoulder_spike" };
@@ -345,6 +362,8 @@ export function fallbackSummary(set: SetEndEvent): string {
   if (f.total_reps === 0) return `No reps counted. ${decision}`;
   if (f.reference_status === "learning" && f.cheats === 0)
     return `Still learning your clean rep, so no calls yet. ${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in, keep them strict.`;
+  if (f.cheats === 0 && f.loose_reps.length)
+    return `${plural(f.total_reps, "rep")}, no cheats; rep${f.loose_reps.length > 1 ? "s" : ""} ${listReps(f.loose_reps)} a bit loose. ${cleanSetCue(f)} ${decision}`;
   if (f.cheats === 0)
     return `${f.total_reps === 1 ? "1 rep, clean" : `All ${f.total_reps} reps clean`}, shoulder in its normal range. ${cleanSetCue(f)} ${decision}`;
   const cheatsF = f.reps.filter((r) => r.verdict === "cheat");
@@ -380,7 +399,7 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
     bullets.push(`Learning your clean rep: no calls until it has a clean reference.`);
   else if (f.reference_reps.length)
     bullets.push(`Rep${f.reference_reps.length > 1 ? "s" : ""} ${listReps(f.reference_reps)} set your clean reference; the other reps are judged against ${f.reference_reps.length > 1 ? "them" : "it"}.`);
-  if (f.all_clean && f.reference_status === "set")
+  if (f.all_clean && f.reference_status === "set" && !f.loose_reps.length)
     bullets.push(`${f.total_reps === 1 ? "The rep was clean" : `All ${f.total_reps} reps clean`}: your shoulder stayed in its normal range on the way up.`);
   if (big.length)
     bullets.push(
@@ -390,6 +409,9 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
     bullets.push(
       `Rep ${r.rep}: smaller cheat${r.up_delt_x_clean != null ? ` (${r.up_delt_x_clean}x its normal share)` : ""}; ${side(r.arm)} biceps peaked at ${r.biceps_peak_pct[r.arm]}% of max.`,
     );
+  const loose = f.reps.filter((r) => r.label === "loose");
+  if (loose.length)
+    bullets.push(`Rep${loose.length > 1 ? "s" : ""} ${listReps(loose.map((r) => r.rep))}: a bit loose, the shoulder crept up as you tired. Not a cheat.`);
   for (const r of near) bullets.push(`Rep ${r.rep}: near-miss at ${r.up_delt_x_clean}x normal, still counted clean.`);
   if (f.tempo.median_up_ms != null)
     bullets.push(
@@ -412,9 +434,11 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
       : f.cheats === 0
         ? f.reference_status === "learning"
           ? `${f.total_reps} rep${f.total_reps > 1 ? "s" : ""} in, learning your clean rep`
-          : f.total_reps === 1
-            ? "1 rep, clean"
-            : `All ${f.total_reps} reps clean`
+          : f.loose_reps.length
+            ? `${plural(f.total_reps, "rep")}, no cheats, ${plural(f.loose_reps.length, "loose rep")}`
+            : f.total_reps === 1
+              ? "1 rep, clean"
+              : `All ${f.total_reps} reps clean`
         : `${plural(f.cheats, "cheat")} in ${plural(f.total_reps, "rep")}${f.first_cheat_rep ? `, first at rep ${f.first_cheat_rep}` : ""}`;
   const cue = big.length
     ? "Pin your elbows and keep your torso still; the moment your shoulder joins in, end the set."
@@ -423,7 +447,23 @@ export function fallbackDetail(set: SetEndEvent, lastDay?: unknown, opts: Fallba
       : f.tempo.fast_up_reps.length > f.total_reps / 2
         ? "Two full seconds up on every rep."
         : decisionLine(set.decision?.next);
-  return { headline, bullets: bullets.slice(0, 6), cue, decision: set.decision, source: "code" };
+  return { headline, bullets: withSensorBullet(bullets.slice(0, 6), f.delt_saturated), cue, decision: set.decision, source: "code" };
+}
+
+/** Card-only hint (never spoken) when a front-delt sensor reads maxed out. */
+export function sensorBullet(arms: readonly string[] | undefined): string | null {
+  const a = [...new Set(arms ?? [])].filter((x) => x === "R" || x === "L") as ("R" | "L")[];
+  if (!a.length) return null;
+  if (a.length === 2)
+    return "Both shoulder sensors are reading maxed out: move each pad a finger-width toward the outside of the shoulder.";
+  return `Your ${side(a[0])} shoulder sensor is reading maxed out: move that pad a finger-width toward the outside of the shoulder.`;
+}
+
+/** Append the sensor hint, keeping at most 6 bullets (it replaces the last one if needed). */
+export function withSensorBullet(bullets: string[], arms: readonly string[] | undefined): string[] {
+  const b = sensorBullet(arms);
+  if (!b) return bullets;
+  return [...bullets.slice(0, 5), b];
 }
 
 export interface SetDetail {

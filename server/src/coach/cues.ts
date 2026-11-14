@@ -1,5 +1,6 @@
 import { DEFAULT_CONFIG } from "../engine/index.js";
 import { thresholdsFor } from "../engine/config.js";
+import { isLoose } from "./facts.js";
 import type { RepEvent, SetEndEvent, Variant } from "./types.js";
 
 /** Call-out thresholds (code decides; the voice just says it). */
@@ -47,9 +48,13 @@ function remember(rep: RepEvent, side: Side | null) {
   m.set(rep.rep, side);
 }
 
+/** Sets that already got their one gentle "a bit loose" cue. */
+const looseCued = new Set<string>();
+
 /** Test hook. */
 export function _resetCueMemory(): void {
   seen.clear();
+  looseCued.clear();
 }
 
 /**
@@ -61,6 +66,12 @@ export function pickCue(rep: RepEvent, opts: PickCueOptions = {}): string | null
   const side = repImbalance(rep);
   remember(rep, side);
   if (rep.cheat) return opts.variant === "preacher" ? "elbows_in" : "delt_took_over";
+  // The engine's "loose" (fatigue creep) is NOT a cheat: at most one gentle cue per set.
+  if (isLoose(rep) && !looseCued.has(rep.set_id)) {
+    if (looseCued.size > 50) looseCued.delete(looseCued.values().next().value!);
+    looseCued.add(rep.set_id);
+    return "a_bit_loose";
+  }
   if (side) {
     if (opts.prevRep !== undefined) {
       if (repImbalance(opts.prevRep) === side) return side;
@@ -106,7 +117,9 @@ export function pickSetEndCueSequence(set: SetEndEvent): string[] {
   if (!n) return ["set_done"];
   if (set.cheats === 0) {
     const learning = set.reps.every((r) => r.baseline_up_delt_ratio == null);
-    return ["set_done", learning ? "learning_clean_rep" : "all_clean"];
+    if (learning) return ["set_done", "learning_clean_rep"];
+    // Loose reps aren't cheats, but "every rep clean" would overstate it.
+    return set.reps.some(isLoose) ? ["set_done", "no_cheats"] : ["set_done", "all_clean"];
   }
   const out = ["set_done", COUNT_CLIP[set.cheats] ?? "many_cheats"];
   const cheatNos = set.reps.filter((r) => r.cheat).map((r) => r.rep);
