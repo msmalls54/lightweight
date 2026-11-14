@@ -87,6 +87,12 @@ All the rules report `"delt_share_jump"` ("delt took over"), because BUILD.md's 
 
 Known limits: a heavy swing from rep 1 with no earlier clean set of the same exercise in the session is flagged only if it's blatant (up ratio > 1.2). Delt *onset* timing (delt crosses a level before the biceps) doesn't separate strict from swing: −208 to +180 ms on strict reps vs +56 to +163 ms on swings. So the engine uses how hard the delt works on the way up, not when it starts.
 
+### Pinned delt, fatigue drift, loose (live run 4)
+
+- **Pinned delt (high baseline).** If an arm's first 2 non-cheat reps both have the delt at the ceiling (≥ `satLevel` 0.95), they become the reference even though they read "blatant". This happens when the pad sits far forward or the gain is high. While the reference's delt is near the ceiling (high baseline), the peak and level rules are off. Only up ratio ≥ 1.6× and +0.3, or delt share +0.25, counts as a cheat. `set_end.delt_saturated` (additive) lists arms whose delt sat at the ceiling on most clean reps; the dashboard can say "move that pad".
+- **Fatigue drift.** Each rep is also compared with an adaptive reference: the per-feature max of the fixed reference and the median of the arm's last 3 non-cheat, plausible reps. A rep that only the fixed reference flags is a gradual rise: not a cheat, and `loose: true` if its up ratio is still ≥ 1.25× the recent trend. Abrupt jumps (clean, clean, then the delt jumps) still flag.
+- **`arm_detail`** (additive, per working arm): verdict, delt share, up ratio, delt peak, time saturated, and the reference values. It shows why a bilateral rep got its call.
+
 ## CoachDecision (set end)
 
 Rules from `data/coach/plan.json`, with the values copied into config (no file reads). **The load never changes.**

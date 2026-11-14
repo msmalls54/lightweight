@@ -18,8 +18,14 @@ import {
 interface Sample { t: number; pct: number[] }
 
 /** What a clean rep looks like for one arm: the reference cheats are measured against. */
-interface Ref { share: number; deltMean: number; deltPeak: number; upRatio: number }
-interface ArmRep extends Ref { flagged: boolean }
+interface Ref {
+  share: number; deltMean: number; deltPeak: number; upRatio: number;
+  /** ms the delt sat >= satLevel */
+  satMs: number;
+  /** High baseline: the delt is near the ceiling on this arm's clean reps (pad far forward). */
+  high?: boolean;
+}
+interface ArmRep extends Ref { flagged: boolean; loose: boolean }
 
 interface SetState {
   ctx: SetContext;
@@ -82,6 +88,8 @@ function rescaleRef(r: Ref, kb: number, kd: number): Ref {
     deltMean: d2,
     deltPeak: r.deltPeak * kd,
     upRatio: kb > EPS ? (r.upRatio * kd) / kb : r.upRatio,
+    satMs: r.satMs,
+    high: r.high,
   };
 }
 
@@ -102,11 +110,31 @@ function judge(cur: Ref, ref: Ref | null, th: RepThresholds): RepEvent["cheat_re
     if (!th.flagWithoutReference) return null;
     return cur.upRatio > th.fallbackUpRatio || cur.share > th.fallbackShareMax ? "delt_share_jump" : null;
   }
+  // High baseline: the delt already sits near the ceiling on clean reps (pad far forward). Peak and
+  // level rules carry no information then, and up ratios swing more, so only a clearly larger jump counts.
+  if (ref.high) {
+    if (cur.upRatio >= ref.upRatio * th.highBaselineUpMult && cur.upRatio - ref.upRatio >= th.highBaselineUpJump) return "delt_share_jump";
+    if (cur.share > ref.share + th.highBaselineShareJump) return "delt_share_jump";
+    return null;
+  }
   if (cur.upRatio >= ref.upRatio * th.upRatioMult && cur.upRatio - ref.upRatio >= th.upRatioJump) return "delt_share_jump";
   if (cur.share > ref.share + th.deltShareJump) return "delt_share_jump";
   if (cur.deltMean >= ref.deltMean * th.deltMeanRatio && cur.deltMean - ref.deltMean >= th.deltMeanJump) return "delt_share_jump";
   if (cur.deltPeak > Math.max(th.deltPeakMax, ref.deltPeak + th.deltPeakJump)) return "delt_peak";
   return null;
+}
+
+/** Per-feature max of two references (the stricter comparison point). */
+function maxRef(a: Ref, b: Ref): Ref {
+  return {
+    share: Math.max(a.share, b.share), deltMean: Math.max(a.deltMean, b.deltMean), deltPeak: Math.max(a.deltPeak, b.deltPeak),
+    upRatio: Math.max(a.upRatio, b.upRatio), satMs: Math.max(a.satMs, b.satMs), high: !!(a.high || b.high),
+  };
+}
+
+function medianOf(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
 }
 
 export class Engine {
@@ -156,7 +184,7 @@ export class Engine {
     if (this.set) {
       for (const arm of ["R", "L"] as const) {
         const { kb, kd } = scaleFor(arm);
-        this.set.armReps[arm] = this.set.armReps[arm].map((r) => ({ ...rescaleRef(r, kb, kd), flagged: r.flagged }));
+        this.set.armReps[arm] = this.set.armReps[arm].map((r) => ({ ...rescaleRef(r, kb, kd), flagged: r.flagged, loose: r.loose }));
       }
     }
   }
@@ -391,21 +419,45 @@ export class Engine {
     let working = s.arms.filter((a) => peak[ARM_CH[a].bi] >= th.hi);
     if (working.length === 0) working = [...s.arms];
 
-    type Eval = { arm: Arm; cur: Ref; ref: Ref | null; reason: RepEvent["cheat_reason"] };
+    type Eval = { arm: Arm; cur: Ref; ref: Ref | null; reason: RepEvent["cheat_reason"]; loose: boolean };
+    const satMs = (c: number) => {
+      let ms = 0;
+      for (let i = 0; i < w.length; i++) if (w[i].pct[c] >= th.satLevel) ms += (i + 1 < w.length ? w[i + 1].t : endT) - w[i].t;
+      return ms;
+    };
     const evals: Eval[] = working.map((arm) => {
       const cur: Ref = {
         share: share(arm),
         deltMean: mean[ARM_CH[arm].delt],
         deltPeak: peak[ARM_CH[arm].delt],
         upRatio: upRatio(w, arm, peak[ARM_CH[arm].bi], th.upPhaseFrom),
+        satMs: satMs(ARM_CH[arm].delt),
       };
-      const ref = this.setRef(s, arm) ?? this.sessionRef(s.ctx, arm, th);
-      return { arm, cur, ref, reason: judge(cur, ref, th) };
+      const base = this.setRef(s, arm) ?? this.sessionRef(s.ctx, arm, th);
+      const vsBase = judge(cur, base, th);
+      if (!vsBase || !base) return { arm, cur, ref: base, reason: vsBase, loose: false };
+      // Fatigue drift: also compare with a slowly adapting reference (median of the arm's last few
+      // non-cheat reps). Flagged only against the fixed reference = a gradual rise: "loose", not a cheat.
+      // Recent reps that could be clean: not flagged, and not blatant (unless the arm is pinned at the ceiling).
+      const recent = s.armReps[arm].filter((r) => !r.flagged && (base.high || plausibleRef(r, th))).slice(-th.adaptReps);
+      if (recent.length === 0) return { arm, cur, ref: base, reason: vsBase, loose: false };
+      const pk = medianOf(recent.map((r) => r.deltPeak));
+      const adapt: Ref = {
+        share: medianOf(recent.map((r) => r.share)), deltMean: medianOf(recent.map((r) => r.deltMean)), deltPeak: pk,
+        upRatio: medianOf(recent.map((r) => r.upRatio)), satMs: medianOf(recent.map((r) => r.satMs)), high: pk >= th.highBaselinePeak,
+      };
+      const eff = maxRef(base, adapt);
+      const vsEff = judge(cur, eff, th);
+      if (vsEff) return { arm, cur, ref: eff, reason: vsEff, loose: false };
+      // Within the trend: loose only if still clearly above the recent reps on the way up, else clean.
+      const loose = cur.upRatio >= eff.upRatio * th.looseUpMult && cur.upRatio - eff.upRatio >= th.looseUpJump;
+      return { arm, cur, ref: eff, reason: null, loose };
     });
     const cheating = evals.filter((e) => e.reason !== null);
-    const pool = cheating.length > 0 ? cheating : evals;
+    const loosening = evals.filter((e) => e.loose);
+    const pool = cheating.length > 0 ? cheating : loosening.length > 0 ? loosening : evals;
     const pick = pool.reduce((a, b) => (b.cur.share > a.cur.share ? b : a));
-    for (const e of evals) s.armReps[e.arm].push({ ...e.cur, flagged: e.reason !== null });
+    for (const e of evals) s.armReps[e.arm].push({ ...e.cur, flagged: e.reason !== null, loose: e.loose });
 
     // Tempo from the picked arm's biceps: onset -> first 90% of peak, last 90% of peak -> end.
     const bi = ARM_CH[pick.arm].bi;
@@ -436,6 +488,20 @@ export class Engine {
       r_share: both && rl > EPS ? r3(mean[ARM_CH.R.bi] / rl) : null,
       up_ms: Math.round(w[iUp].t - w[0].t),
       down_ms: Math.round(endT - w[iDown].t),
+      loose: pick.loose,
+      arm_detail: Object.fromEntries(
+        evals.map((e) => [e.arm, {
+          verdict: e.reason ? "cheat" : e.loose ? "loose" : "clean",
+          cheat_reason: e.reason,
+          delt_share: r3(e.cur.share),
+          up_delt_ratio: r3(e.cur.upRatio),
+          delt_peak: r3(Math.min(this.cfg.pctMax, e.cur.deltPeak)),
+          delt_sat_ms: Math.round(e.cur.satMs),
+          ref_delt_share: e.ref ? r3(e.ref.share) : null,
+          ref_up_delt_ratio: e.ref ? r3(e.ref.upRatio) : null,
+          ref_delt_peak: e.ref ? r3(Math.min(this.cfg.pctMax, e.ref.deltPeak)) : null,
+        }]),
+      ) as RepEvent["arm_detail"],
     };
   }
 
@@ -446,14 +512,25 @@ export class Engine {
    * must not become the reference on its own.
    */
   private setRef(s: SetState, arm: Arm): Ref | null {
-    // A rep that would be a blatant cheat on its own is never the clean reference.
-    const clean = s.armReps[arm].filter((r) => !r.flagged && plausibleRef(r, s.th)).slice(0, s.th.baselineReps);
-    if (clean.length < s.th.baselineReps) return null;
+    const n = s.th.baselineReps;
+    const unflagged = s.armReps[arm].filter((r) => !r.flagged);
+    // Delt pinned at the ceiling on the arm's first reps (pad far forward): every rep reads "blatant",
+    // so those first reps ARE the clean reference, in high-baseline mode (kept, for a stable reference).
+    const first = unflagged.slice(0, n);
+    let clean: ArmRep[];
+    if (first.length === n && first.every((r) => r.deltPeak >= s.th.satLevel)) clean = first;
+    else {
+      // Otherwise a rep that would be a blatant cheat on its own is never the clean reference.
+      clean = unflagged.filter((r) => plausibleRef(r, s.th)).slice(0, n);
+      if (clean.length < n) return null;
+    }
     return {
+      high: Math.min(...clean.map((r) => r.deltPeak)) >= s.th.highBaselinePeak,
       share: Math.max(...clean.map((r) => r.share)),
       deltMean: Math.max(...clean.map((r) => r.deltMean)),
       deltPeak: Math.max(...clean.map((r) => r.deltPeak)),
       upRatio: Math.max(...clean.map((r) => r.upRatio)),
+      satMs: Math.max(...clean.map((r) => r.satMs)),
     };
   }
 
@@ -466,11 +543,12 @@ export class Engine {
     if (this.sessionRefs.session !== ctx.session_id) return null;
     const ref = this.sessionRefs.refs.get(this.refKey(ctx, arm)) ?? null;
     // After an MVC raise a reference can turn out blatant (a too-low MVC hid a delt-led rep): drop it.
-    return ref && plausibleRef(ref, th) ? ref : null;
+    return ref && (ref.high || plausibleRef(ref, th)) ? ref : null;
   }
 
   private closeSet(): SetEndEvent {
     const s = this.set!;
+    const th0 = s.th;
     this.set = null;
     if (this.sessionRefs.session !== s.ctx.session_id) this.sessionRefs = { session: s.ctx.session_id, refs: new Map() };
     for (const arm of s.arms) {
@@ -489,6 +567,13 @@ export class Engine {
       first_cheat_rep: first,
       decision: this.decide(s.ctx, reps, cheats, first),
     };
+    // Arms whose delt sat at the ceiling on most of their non-cheat reps: the pad is too far forward
+    // (or the gain too high) for the cheat check to see much. The dashboard can say "move the pad".
+    const saturated = s.arms.filter((arm) => {
+      const clean = s.armReps[arm].filter((r) => !r.flagged);
+      return clean.length >= 2 && clean.filter((r) => r.deltPeak >= th0.satLevel).length * 2 >= clean.length;
+    });
+    if (saturated.length) ev.delt_saturated = saturated;
     // Self-calibrating MVC: a set with reps raises each channel's MVC to its own p99 (never lowers).
     // The refs saved above are rescaled by setCalibration, so the next set stays consistent.
     if (this.cfg.autoRaiseMvc && reps.length > 0 && s.raw[0].length > 0) {
