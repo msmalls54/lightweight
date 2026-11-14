@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lightweight</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #151922; --panel2: #1c212c; --line: #2a3140; --text: #f2f4f8; --dim: #8a93a6;
+    --red: #ff3b3b; --green: #2fd67b; --amber: #ffb020; --blue: #4aa3ff; --bi: #4aa3ff; --delt: #ff8a3d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+  body { display: grid; grid-template-rows: auto auto 1fr auto; min-height: 100vh; }
+  button, input, select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  button { cursor: pointer; font-weight: 600; }
+  button:hover { border-color: var(--dim); }
+  button.primary { background: #23406a; border-color: var(--blue); }
+  button.danger { background: #4a1c1c; border-color: var(--red); }
+  button:disabled { opacity: .45; cursor: default; }
+
+  header { display: flex; align-items: center; gap: 18px; padding: 12px 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .brand { font-size: 30px; font-weight: 800; letter-spacing: .08em; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: 18px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--dim); }
+  .dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .dot.warn { background: var(--amber); }
+  .dot.off { background: var(--red); }
+  .mode { font-weight: 800; letter-spacing: .1em; }
+  .mode.replay { background: #3b2a00; border-color: var(--amber); color: var(--amber); }
+  .grow { flex: 1; }
+  .who { font-size: 22px; font-weight: 700; }
+  .who small { color: var(--dim); font-weight: 400; font-size: 16px; }
+
+  #banner { height: 0; overflow: hidden; transition: height .15s; background: var(--red); color: #fff; text-align: center; font-weight: 900; letter-spacing: .04em; }
+  #banner.show { height: 96px; }
+  #banner span { display: block; font-size: 64px; line-height: 96px; }
+
+  main { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(380px, 1.25fr) minmax(320px, 1fr); gap: 18px; padding: 18px 22px; min-height: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-height: 0; display: flex; flex-direction: column; }
+  .card h2 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); font-weight: 700; }
+
+  #map { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 280px; }
+  #map svg { height: min(62vh, 640px); width: auto; }
+  .maplegend { display: flex; justify-content: space-between; color: var(--dim); font-size: 15px; margin-top: 6px; }
+
+  #setline { font-size: 36px; font-weight: 800; margin-bottom: 4px; }
+  #setline .cnt-clean { color: var(--green); } #setline .cnt-cheat { color: var(--red); }
+  #setmeta { color: var(--dim); font-size: 18px; margin-bottom: 12px; }
+  #bars { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; min-height: 300px; }
+  .bar { display: flex; flex-direction: column; align-items: center; gap: 8px; min-height: 0; }
+  .bar .val { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .bar .track { position: relative; flex: 1; width: 100%; max-width: 110px; background: #0e1118; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .bar .fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; border-radius: 8px 8px 0 0; transition: height .06s linear; }
+  .bar.bi .fill { background: linear-gradient(to top, #1d5fa8, var(--bi)); }
+  .bar.delt .fill { background: linear-gradient(to top, #a8501d, var(--delt)); }
+  .bar.hot .fill { background: linear-gradient(to top, #a81d1d, var(--red)); }
+  .bar .mvc { position: absolute; left: 0; right: 0; border-top: 2px dashed #ffffff55; }
+  .bar .mvc::after { content: "MVC"; position: absolute; right: 4px; top: -18px; font-size: 11px; color: #ffffff88; }
+  .bar .lbl { font-size: 20px; font-weight: 700; text-align: center; line-height: 1.1; }
+  .bar .lbl small { display: block; color: var(--dim); font-weight: 400; font-size: 14px; }
+  .stale .fill { opacity: .35; }
+
+  #coach { margin-top: 12px; padding: 12px 14px; background: var(--panel2); border-radius: 10px; font-size: 22px; min-height: 56px; border-left: 4px solid var(--blue); }
+  #coach:empty::before { content: "Coach line appears after each set."; color: var(--dim); font-size: 17px; }
+
+  #feed { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  #feed li { padding: 10px 14px; border-radius: 10px; background: var(--panel2); border-left: 6px solid var(--green); display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
+  #feed li.cheat { border-left-color: var(--red); background: #2a1515; }
+  #feed li.setend { border-left-color: var(--blue); background: #15202e; }
+  #feed .t { font-size: 22px; font-weight: 800; }
+  #feed .tag { font-size: 20px; font-weight: 800; color: var(--green); text-align: right; }
+  #feed li.cheat .tag { color: var(--red); }
+  #feed .d { grid-column: 1 / -1; color: var(--dim); font-size: 16px; }
+  #feed li.fresh { animation: pop .5s ease-out; }
+  @keyframes pop { from { transform: scale(1.04); filter: brightness(1.6); } to { transform: none; filter: none; } }
+
+  footer { display: flex; flex-wrap: wrap; gap: 14px 26px; padding: 12px 22px 16px; border-top: 1px solid var(--line); align-items: center; font-size: 16px; }
+  .grp { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grp > b { color: var(--dim); text-transform: uppercase; font-size: 13px; letter-spacing: .1em; margin-right: 2px; }
+  .grp label { display: inline-flex; gap: 4px; align-items: center; }
+  input[type=number] { width: 80px; }
+  #exercise { width: 170px; }
+  #replaySel { max-width: 340px; }
+  audio { height: 36px; max-width: 260px; }
+
+  #cal { position: fixed; inset: 0; background: #07090dee; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 10; text-align: center; padding: 24px; }
+  #cal.show { display: flex; }
+  #calStep { color: var(--dim); font-size: 24px; letter-spacing: .1em; text-transform: uppercase; }
+  #calTitle { font-size: 88px; font-weight: 900; margin: 10px 0; line-height: 1.05; }
+  #calHint { font-size: 28px; color: var(--dim); min-height: 40px; }
+  #calCount { font-size: 160px; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--blue); min-height: 190px; }
+  #calTitle.go { color: var(--red); }
+  #calResult { font-size: 26px; max-width: 900px; }
+  #calResult .bad { color: var(--red); }
+  #calResult .good { color: var(--green); }
+  #toast { position: fixed; right: 22px; bottom: 90px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 18px; display: none; z-index: 5; max-width: 480px; }
+  #toast.show { display: block; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr 1.4fr; } #feedCard { grid-column: 1 / -1; min-height: 300px; } #map svg { height: 46vh; } #banner span { font-size: 40px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">LIGHTWEIGHT</div>
+  <span class="pill mode" id="mode">LIVE</span>
+  <span class="pill"><span class="dot" id="devDot"></span><span id="devText">No device</span></span>
+  <span class="pill" id="hbText">Heartbeat: none</span>
+  <span class="pill"><span class="dot" id="sseDot"></span><span id="sseText">Dashboard link</span></span>
+  <span class="grow"></span>
+  <span class="who" id="who">No session</span>
+</header>
+<div id="banner"><span id="bannerText"></span></div>
+
+<main>
+  <section class="card">
+    <h2>Muscle map</h2>
+    <div id="map"></div>
+    <div class="maplegend"><span>◀ Right arm</span><span>Gray = not measured</span><span>Left arm ▶</span></div>
+  </section>
+
+  <section class="card">
+    <div id="setline">Ready</div>
+    <div id="setmeta">Start a set or just curl.</div>
+    <div id="bars"></div>
+    <div id="coach"></div>
+  </section>
+
+  <section class="card" id="feedCard">
+    <h2>Reps</h2>
+    <ul id="feed"></ul>
+  </section>
+</main>
+
+<footer>
+  <div class="grp"><b>Session</b>
+    <button id="btnNew">New session (Mike)</button>
+    <button id="btnWalkup">Walk-up…</button>
+    <label><input type="checkbox" id="armR" checked> R arm</label>
+    <label><input type="checkbox" id="armL" checked> L arm</label>
+  </div>
+  <div class="grp"><b>Calibrate</b>
+    <button id="btnCal" class="primary">Calibrate (C)</button>
+  </div>
+  <div class="grp"><b>Set</b>
+    <input id="exercise" value="dumbbell curl" aria-label="Exercise">
+    <select id="variant" aria-label="Variant"><option>standing</option><option>preacher</option><option>hammer</option></select>
+    <input id="load" type="number" value="35" min="0" step="5" aria-label="Load lb"> lb
+    <label><input type="checkbox" id="autoNext" checked> auto next</label>
+    <button id="btnStart" class="primary">Start set (S)</button>
+    <button id="btnStop">Stop set (X)</button>
+  </div>
+  <div class="grp"><b>Replay</b>
+    <select id="replaySel" aria-label="Session to replay"></select>
+    <button id="btnReplay">Replay</button>
+    <button id="btnReplayStop" class="danger">Stop</button>
+  </div>
+  <div class="grp"><b>Music</b>
+    <input type="file" id="musicFiles" accept="audio/*" multiple aria-label="Music files">
+    <audio id="music" controls></audio>
+  </div>
+</footer>
+
+<div id="cal">
+  <div id="calStep"></div>
+  <div id="calTitle"></div>
+  <div id="calHint"></div>
+  <div id="calCount"></div>
+  <div id="calResult"></div>
+  <p><button id="calCancel" class="danger">Cancel</button> <button id="calClose" style="display:none" class="primary">Done</button></p>
+</div>
+<div id="toast"></div>
+
+<script src="/voice-player.js" onerror="window.__lwNoVoice = true"></script>
+<script src="/app.js"></script>
+</body>
+</html>
