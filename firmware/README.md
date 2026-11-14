@@ -51,7 +51,13 @@ arduino-cli monitor -p COM8 -c baudrate=115200
 ## On battery (on-body)
 Unplug from the laptop, plug the UNO into the power bank. It joins the hotspot and streams within ~5–10 s. The dashboard's heartbeat (RSSI, queue, dropped) is your only status then.
 
+## Measured (Nov 14, YC, iPhone hotspot, against the real server on :3000)
+352.8 s run after upload (sensor cables unplugged, so values were noise): **1,764 batches, 5.000 batches/s, every one 4×40, 0 seq gaps, 0 resends, 0 dropped, 0 `t0_ms` discontinuities** (all steps exactly 200 ms). Board side: `samples` = `expected` ±1 the whole run, tick interval 4,940–5,060 µs, ISR max 172 µs, 1 TCP connection for the whole run (keep-alive), POST round-trip avg ~131 ms / max 273 ms, RSSI -40 to -52.
+
+Headroom: each ~1.2 KB POST takes ~130 ms, mostly the 115,200-baud UART to the ESP32-S3, so the link runs ~70% busy. After an outage it catches up at only ~2.5 batches/s net: a full 8.6 s backlog takes ~17 s to drain. Live data lags by that much until then.
+
 ## Troubleshooting
+- No Serial output at all: on the R4 WiFi, `Serial` is a UART bridged by the ESP32-S3. A terminal needs DTR on. `arduino-cli monitor` prints nothing when its stdout isn't a TTY; use a real terminal or the IDE's Serial Monitor.
 - `# wifi: join failed` forever: hotspot off/asleep, or not 2.4 GHz ("Maximize Compatibility" on the iPhone). Keep the hotspot screen open while joining.
 - `fail` climbing, `q` growing: server not on `LAPTOP_IP:3000`, laptop IP changed (check `ipconfig`), or firewall.
 - A channel flat at ~8,150: that Link Shield is on RAW, not ENV.
