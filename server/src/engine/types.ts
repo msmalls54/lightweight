@@ -16,6 +16,10 @@ export interface RepEvent {
   type: "rep"; set_id: string; arm: Arm; rep: number; start_ms: number; end_ms: number;
   peak_pct: number[]; mean_pct: number[]; delt_share: number; baseline_delt_share: number | null;
   cheat: boolean; cheat_reason: "delt_share_jump" | "delt_peak" | null; r_share: number | null; up_ms: number; down_ms: number;
+  /** Additive (not in BUILD.md): delt/biceps mean ratio on the way up (onset -> biceps peak), the main cheat feature. */
+  up_delt_ratio?: number;
+  /** Additive: the clean reference's up_delt_ratio (null = no reference yet). */
+  baseline_up_delt_ratio?: number | null;
 }
 /** Load NEVER changes (35 lb constant). */
 export interface CoachDecision { next: "continue" | "stop_at_first_cheat_rest_longer" | "slow_the_tempo"; reason: string }

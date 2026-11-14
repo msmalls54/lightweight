@@ -10,6 +10,8 @@ export interface SynthRep {
   bi?: number;
   /** Delt peak %MVC (follows the same shape as the biceps). Default 0.08 (clean). */
   delt?: number;
+  /** Delt peak while lowering (eccentric), if different from `delt`. Blends in over the first 40% of the down phase. */
+  deltDown?: number;
   /** Left biceps peak when arm = "both" (imbalance). Default = bi. */
   lBi?: number;
   upMs?: number;   // default 800
@@ -83,6 +85,7 @@ export function synth(reps: SynthRep[], opts: SynthOptions = {}): Synth {
     arm: r.arm ?? "R",
     bi: r.bi ?? 0.8,
     delt: r.delt ?? 0.08,
+    deltDown: r.deltDown ?? r.delt ?? 0.08,
     lBi: r.lBi ?? r.bi ?? 0.8,
     upMs: r.upMs ?? 800,
     holdMs: r.holdMs ?? 200,
@@ -107,14 +110,17 @@ export function synth(reps: SynthRep[], opts: SynthOptions = {}): Synth {
     const pct = [0, 0, 0, 0];
     full.forEach((r, k) => {
       const s = shape(r, ms - windows[k].start);
+      const into = ms - windows[k].start - r.upMs - r.holdMs; // ms into the lowering
+      const mix = into <= 0 ? 0 : Math.min(1, into / (0.4 * r.downMs));
+      const delt = r.delt + (r.deltDown - r.delt) * mix;
       if (s === 0) return;
       if (r.arm === "R" || r.arm === "both") {
         pct[0] += r.bi * s;
-        pct[1] += r.delt * s;
+        pct[1] += delt * s;
       }
       if (r.arm === "L" || r.arm === "both") {
         pct[2] += (r.arm === "both" ? r.lBi : r.bi) * s;
-        pct[3] += r.delt * s;
+        pct[3] += delt * s;
       }
     });
     for (let c = 0; c < 4; c++) {
@@ -164,7 +170,16 @@ export function toBatches(
 /** Ready-made sets. */
 export const presets = {
   clean: (n = 8): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.8, delt: 0.08 })),
-  swing: (n = 5): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.55, delt: 0.6 })),
+  /** Blatant swing: delt share ~0.63, flagged even without a clean reference. */
+  swing: (n = 5): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.45, delt: 0.75 })),
+  /** Heavy dumbbells, strict: the delt works hard on clean reps too (share ~0.43, delt peak 0.6). */
+  heavyClean: (n = 6): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.8, delt: 0.6 })),
+  /** Heavy dumbbells, swing: biceps AND delt go up; share only ~0.53, delt level ~1.6x clean. */
+  heavySwing: (n = 4): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.85, delt: 0.95 })),
+  /** Heavy strict rep as recorded Nov 14: delt ~0.45x biceps on the way up, works hard lowering. */
+  heavyEccentric: (n = 6): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.8, delt: 0.35, deltDown: 0.9 })),
+  /** Heavy swing as recorded Nov 14: delt fires with/above the biceps on the way up. */
+  heavySwingUp: (n = 3): SynthRep[] => Array.from({ length: n }, () => ({ bi: 0.8, delt: 1.1, deltDown: 0.6 })),
   /** Clean through rep 5, then the delt climbs from rep 6 on. */
   fatigueDrift: (n = 10): SynthRep[] =>
     Array.from({ length: n }, (_, i) => (i < 5 ? { bi: 0.8, delt: 0.08 } : { bi: 0.75, delt: Math.min(0.6, 0.3 + 0.08 * (i - 5)) })),

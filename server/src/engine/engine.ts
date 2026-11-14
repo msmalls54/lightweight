@@ -17,25 +17,73 @@ import {
 
 interface Sample { t: number; pct: number[] }
 
+/** What a clean rep looks like for one arm: the reference cheats are measured against. */
+interface Ref { share: number; deltMean: number; deltPeak: number; upRatio: number }
+interface ArmRep extends Ref { flagged: boolean }
+
 interface SetState {
   ctx: SetContext;
   arms: Arm[];
   th: RepThresholds;
   reps: RepEvent[];
-  /** delt_share history per arm (reps where that arm worked), for the baseline. */
-  shares: Record<Arm, number[]>;
+  /** Per-arm rep history (reps where that arm worked), for the reference. */
+  armReps: Record<Arm, ArmRep[]>;
   phase: "idle" | "rep";
   /** Samples since the biceps rose above lo (onset), while idle. */
   pre: Sample[];
   rep: Sample[];
   repPeak: number;
-  armed: boolean;
-  lastEndLevel: number;
+  /** Lowest signal since the last rep ended (where the next rep window starts). */
+  valley: number;
   lastRepEndT: number | null;
 }
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 const EPS = 1e-9;
+
+/**
+ * Up (concentric) phase of one arm: delt mean / biceps mean while the biceps climbs from
+ * `from` x its peak to 90% of it. Not from the window start: on touch-and-go heavy reps the delt
+ * is still busy with the previous rep's lowering at the bottom.
+ */
+function upRatio(w: Sample[], arm: Arm, biPeak: number, from: number): number {
+  const { bi, delt } = ARM_CH[arm];
+  let end = 0;
+  while (end < w.length - 1 && w[end].pct[bi] < 0.9 * biPeak) end++;
+  let start = end;
+  while (start > 0 && w[start - 1].pct[bi] >= from * biPeak) start--;
+  if (start === end) start = Math.max(0, end - 1); // at least 2 samples when there are 2
+  let b = 0;
+  let d = 0;
+  for (let i = start; i <= end; i++) {
+    b += w[i].pct[bi];
+    d += w[i].pct[delt];
+  }
+  return b > EPS ? d / b : 0;
+}
+
+/**
+ * Cheat call for one arm's rep, against that arm's clean reference (null = no clean reps yet).
+ * - delt_share_jump ("delt took over"), any of:
+ *   - up phase: delt/biceps mean ratio from onset to the biceps peak (the concentric half) is
+ *     >= upRatioMult x the reference AND >= reference + upRatioJump. The main rule: a swing fires
+ *     the delt on the way UP; a strict heavy rep only uses it on the way down (stabilizing), which
+ *     dilutes any whole-rep number.
+ *   - whole rep: delt share above the reference by > deltShareJump (band curls), or delt mean
+ *     %MVC >= deltMeanRatio x the reference AND >= reference + deltMeanJump.
+ * - delt_peak: delt peak above max(deltPeakMax, reference peak + deltPeakJump).
+ * Without a reference only blatant reps are flagged: up ratio > fallbackUpRatio or share > fallbackShareMax.
+ */
+function judge(cur: Ref, ref: Ref | null, th: RepThresholds): RepEvent["cheat_reason"] {
+  if (ref === null) {
+    return cur.upRatio > th.fallbackUpRatio || cur.share > th.fallbackShareMax ? "delt_share_jump" : null;
+  }
+  if (cur.upRatio >= ref.upRatio * th.upRatioMult && cur.upRatio - ref.upRatio >= th.upRatioJump) return "delt_share_jump";
+  if (cur.share > ref.share + th.deltShareJump) return "delt_share_jump";
+  if (cur.deltMean >= ref.deltMean * th.deltMeanRatio && cur.deltMean - ref.deltMean >= th.deltMeanJump) return "delt_share_jump";
+  if (cur.deltPeak > Math.max(th.deltPeakMax, ref.deltPeak + th.deltPeakJump)) return "delt_peak";
+  return null;
+}
 
 export class Engine {
   private cfg: EngineConfig;
@@ -47,6 +95,8 @@ export class Engine {
   private timeOffset = 0;
   private nextLiveT = -Infinity;
   private earlyStreak = { session: "", count: 0 };
+  /** Clean reference per arm from earlier sets of this session, keyed by arm|exercise|variant|load. */
+  private sessionRefs = { session: "", refs: new Map<string, Ref>() };
 
   constructor(config?: Partial<EngineConfig>) {
     this.cfg = resolveConfig(config);
@@ -81,13 +131,12 @@ export class Engine {
       arms,
       th: thresholdsFor(this.cfg, ctx.variant),
       reps: [],
-      shares: { R: [], L: [] },
+      armReps: { R: [], L: [] },
       phase: "idle",
       pre: [],
       rep: [],
       repPeak: 0,
-      armed: true,
-      lastEndLevel: this.cfg.lo,
+      valley: Infinity,
       lastRepEndT: null,
     };
   }
@@ -151,23 +200,28 @@ export class Engine {
       return;
     }
 
-    // idle
-    if (!s.armed && sig < s.lastEndLevel) s.armed = true;
-    if (sig >= th.lo) {
+    // idle. The next rep's window starts at the lowest point since the last rep (or where the
+    // signal rose back above lo): under heavy continuous reps the biceps never fully relaxes.
+    if (sig < th.lo) {
+      s.pre = [];
+      s.valley = sig;
+    } else if (s.pre.length === 0 || sig <= s.valley) {
+      s.pre = [x];
+      s.valley = sig;
+    } else {
       s.pre.push(x);
       while (s.pre.length > 1 && s.pre[0].t < x.t - this.cfg.maxPreOnsetMs) s.pre.shift();
-    } else {
-      s.pre = [];
     }
-    if (s.armed && sig >= th.hi) {
-      if (s.lastRepEndT !== null && x.t - s.lastRepEndT < th.minGapMs) {
-        s.armed = false; // too soon after the last rep: same movement, ignore until it drops again
-      } else {
-        s.phase = "rep";
-        s.rep = s.pre.length > 0 ? s.pre : [x];
-        s.pre = [];
-        s.repPeak = Math.max(...s.rep.map((p) => this.signal(s, p.pct)));
-      }
+    // Within minGapMs of the last rep the start is deferred (not dropped): a rep that follows
+    // straight on still counts once the gap has passed, a brief rebound doesn't.
+    // A new rep must also rise restartRise above the valley, so a tail lingering near the end
+    // level (or an MVC set too low, which lifts the valleys) doesn't start a fake rep.
+    const startLevel = Math.max(th.hi, s.valley + th.restartRise);
+    if (sig >= startLevel && (s.lastRepEndT === null || x.t - s.lastRepEndT >= th.minGapMs)) {
+      s.phase = "rep";
+      s.rep = s.pre;
+      s.pre = [];
+      s.repPeak = Math.max(...s.rep.map((p) => this.signal(s, p.pct)));
     }
 
     if (s.reps.length > 0 && s.lastRepEndT !== null && x.t - s.lastRepEndT >= this.cfg.setEndGapMs) {
@@ -184,12 +238,11 @@ export class Engine {
   private finishRep(endT: number, out: EngineEvent[] | null): void {
     const s = this.set!;
     const w = s.rep;
-    const endLevel = this.endLevel(s);
     s.phase = "idle";
     s.rep = [];
     s.pre = [];
+    s.valley = Infinity;
     s.repPeak = 0;
-    s.lastEndLevel = endLevel;
     if (w.length === 0 || endT - w[0].t < s.th.minRepMs) return; // blip
     const ev = this.scoreRep(s, w, endT);
     s.reps.push(ev);
@@ -217,23 +270,21 @@ export class Engine {
     let working = s.arms.filter((a) => peak[ARM_CH[a].bi] >= th.hi);
     if (working.length === 0) working = [...s.arms];
 
-    type Eval = { arm: Arm; share: number; baseline: number | null; reason: RepEvent["cheat_reason"] };
+    type Eval = { arm: Arm; cur: Ref; ref: Ref | null; reason: RepEvent["cheat_reason"] };
     const evals: Eval[] = working.map((arm) => {
-      const sh = share(arm);
-      const prior = s.shares[arm];
-      const baseline =
-        prior.length >= th.baselineReps
-          ? Math.min(th.baselineCap, prior.slice(0, th.baselineReps).reduce((x, y) => x + y, 0) / th.baselineReps)
-          : null;
-      const ref = baseline ?? th.baselineCap;
-      const reason: RepEvent["cheat_reason"] =
-        sh > ref + th.deltShareJump ? "delt_share_jump" : peak[ARM_CH[arm].delt] > th.deltPeakMax ? "delt_peak" : null;
-      return { arm, share: sh, baseline, reason };
+      const cur: Ref = {
+        share: share(arm),
+        deltMean: mean[ARM_CH[arm].delt],
+        deltPeak: peak[ARM_CH[arm].delt],
+        upRatio: upRatio(w, arm, peak[ARM_CH[arm].bi], th.upPhaseFrom),
+      };
+      const ref = this.setRef(s, arm) ?? this.sessionRef(s.ctx, arm);
+      return { arm, cur, ref, reason: judge(cur, ref, th) };
     });
     const cheating = evals.filter((e) => e.reason !== null);
     const pool = cheating.length > 0 ? cheating : evals;
-    const pick = pool.reduce((a, b) => (b.share > a.share ? b : a));
-    for (const e of evals) s.shares[e.arm].push(e.share);
+    const pick = pool.reduce((a, b) => (b.cur.share > a.cur.share ? b : a));
+    for (const e of evals) s.armReps[e.arm].push({ ...e.cur, flagged: e.reason !== null });
 
     // Tempo from the picked arm's biceps: onset -> first 90% of peak, last 90% of peak -> end.
     const bi = ARM_CH[pick.arm].bi;
@@ -255,8 +306,10 @@ export class Engine {
       end_ms: endT,
       peak_pct: peak.map(r3),
       mean_pct: mean.map(r3),
-      delt_share: r3(pick.share),
-      baseline_delt_share: pick.baseline === null ? null : r3(pick.baseline),
+      delt_share: r3(pick.cur.share),
+      baseline_delt_share: pick.ref === null ? null : r3(pick.ref.share),
+      up_delt_ratio: r3(pick.cur.upRatio),
+      baseline_up_delt_ratio: pick.ref === null ? null : r3(pick.ref.upRatio),
       cheat: pick.reason !== null,
       cheat_reason: pick.reason,
       r_share: both && rl > EPS ? r3(mean[ARM_CH.R.bi] / rl) : null,
@@ -265,9 +318,42 @@ export class Engine {
     };
   }
 
+  /**
+   * This set's reference for an arm: once the arm has done `baselineReps` reps, the per-feature
+   * max over the unflagged ones among them (max, so a light warm-up rep 1 doesn't make rep 3 look
+   * like a cheat). Null before that, or if all of them were flagged.
+   */
+  private setRef(s: SetState, arm: Arm): Ref | null {
+    const first = s.armReps[arm].slice(0, s.th.baselineReps);
+    if (first.length < s.th.baselineReps) return null;
+    const clean = first.filter((r) => !r.flagged);
+    if (clean.length === 0) return null;
+    return {
+      share: Math.max(...clean.map((r) => r.share)),
+      deltMean: Math.max(...clean.map((r) => r.deltMean)),
+      deltPeak: Math.max(...clean.map((r) => r.deltPeak)),
+      upRatio: Math.max(...clean.map((r) => r.upRatio)),
+    };
+  }
+
+  private refKey(ctx: SetContext, arm: Arm): string {
+    return `${arm}|${ctx.exercise}|${ctx.variant}|${ctx.load_lb ?? ""}`;
+  }
+
+  /** The last clean reference for this arm + exercise + variant + load earlier in this session. */
+  private sessionRef(ctx: SetContext, arm: Arm): Ref | null {
+    if (this.sessionRefs.session !== ctx.session_id) return null;
+    return this.sessionRefs.refs.get(this.refKey(ctx, arm)) ?? null;
+  }
+
   private closeSet(): SetEndEvent {
     const s = this.set!;
     this.set = null;
+    if (this.sessionRefs.session !== s.ctx.session_id) this.sessionRefs = { session: s.ctx.session_id, refs: new Map() };
+    for (const arm of s.arms) {
+      const ref = this.setRef(s, arm);
+      if (ref) this.sessionRefs.refs.set(this.refKey(s.ctx, arm), ref);
+    }
     const reps = s.reps;
     const cheats = reps.filter((r) => r.cheat).length;
     const first = reps.find((r) => r.cheat)?.rep ?? null;

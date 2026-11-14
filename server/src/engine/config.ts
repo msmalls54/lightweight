@@ -15,21 +15,36 @@ export interface RepThresholds {
    */
   endPeakFrac: number;
   endLevelMax: number;
+  /** A new rep starts at max(hi, valley since the last rep + restartRise). */
+  restartRise: number;
   /** Reps shorter than this (onset above `lo` → end) are discarded as blips. */
   minRepMs: number;
   /** After a rep ends, a new rep can't start for this long (refractory). */
   minGapMs: number;
-  /** Cheat: delt_share above baseline by more than this. */
+  /** Up phase = biceps climbing from this fraction of its rep peak to 90% of it. */
+  upPhaseFrom: number;
+  /** Cheat (main rule): up-phase delt/biceps ratio at least this many times the reference... */
+  upRatioMult: number;
+  /** ...and at least this much above it (both must hold). */
+  upRatioJump: number;
+  /** No reference yet: flag an up-phase delt/biceps ratio above this. */
+  fallbackUpRatio: number;
+  /** Cheat: delt_share above the clean reference by more than this. */
   deltShareJump: number;
-  /** Cheat: delt peak %MVC above this. */
+  /** Cheat: delt mean %MVC at least this many times the reference... */
+  deltMeanRatio: number;
+  /** ...and at least this much above it (both must hold). */
+  deltMeanJump: number;
+  /** Cheat: delt peak %MVC above max(deltPeakMax, reference peak + deltPeakJump). */
   deltPeakMax: number;
-  /** Baseline = mean delt_share of the first N reps of the set (per arm). */
-  baselineReps: number;
+  deltPeakJump: number;
   /**
-   * Baseline never goes above this, and reps before the baseline exists compare against it.
-   * Stops a set that swings from rep 1 from hiding its cheats behind a high baseline.
+   * Reference = per-feature max over the unflagged reps among the arm's first N reps of the set.
+   * Before that: the last clean reference from an earlier set (same session, exercise, variant, load).
    */
-  baselineCap: number;
+  baselineReps: number;
+  /** No reference yet (first reps of the session): flag only a delt share above this. */
+  fallbackShareMax: number;
   /** Up phase (onset → 90% of peak) faster than this counts as "very fast". */
   fastUpMs: number;
 }
@@ -73,16 +88,26 @@ export const DEFAULT_CONFIG: EngineConfig = {
   // Rep detection (tuned on data/coach/history/raw/2026-11-13-bench.csv).
   hi: 0.35,
   lo: 0.15,
-  endPeakFrac: 0.25,
-  endLevelMax: 0.25,
+  // End at 30% of the rep peak, between 0.15 and 0.4. Up to 0.4 because a too-low biceps MVC
+  // (FLEX hold < curls) lifts the valleys between heavy reps to ~0.3.
+  endPeakFrac: 0.3,
+  endLevelMax: 0.4,
+  restartRise: 0.2,
   // Spec says ~0.6 s. The real swing rep 2 (Nov 13) is only 0.50 s above lo, so 0.4 s.
   minRepMs: 400,
   minGapMs: 400,
-  // Cheat flag.
+  // Cheat flag (tuned on the Nov 13 band CSV and the two Nov 14 35 lb CSVs).
+  upPhaseFrom: 0.3,
+  upRatioMult: 1.35,
+  upRatioJump: 0.15,
+  fallbackUpRatio: 1.2,
   deltShareJump: 0.15,
+  deltMeanRatio: 1.5,
+  deltMeanJump: 0.15,
   deltPeakMax: 0.5,
+  deltPeakJump: 0.4,
   baselineReps: 2,
-  baselineCap: 0.25,
+  fallbackShareMax: 0.6,
   fastUpMs: 300,
 
   defaultRest: 550,
@@ -121,12 +146,20 @@ export function thresholdsFor(cfg: EngineConfig, variant: Variant): RepThreshold
     lo: o.lo ?? cfg.lo,
     endPeakFrac: o.endPeakFrac ?? cfg.endPeakFrac,
     endLevelMax: o.endLevelMax ?? cfg.endLevelMax,
+    restartRise: o.restartRise ?? cfg.restartRise,
     minRepMs: o.minRepMs ?? cfg.minRepMs,
     minGapMs: o.minGapMs ?? cfg.minGapMs,
+    upPhaseFrom: o.upPhaseFrom ?? cfg.upPhaseFrom,
+    upRatioMult: o.upRatioMult ?? cfg.upRatioMult,
+    upRatioJump: o.upRatioJump ?? cfg.upRatioJump,
+    fallbackUpRatio: o.fallbackUpRatio ?? cfg.fallbackUpRatio,
     deltShareJump: o.deltShareJump ?? cfg.deltShareJump,
+    deltMeanRatio: o.deltMeanRatio ?? cfg.deltMeanRatio,
+    deltMeanJump: o.deltMeanJump ?? cfg.deltMeanJump,
     deltPeakMax: o.deltPeakMax ?? cfg.deltPeakMax,
+    deltPeakJump: o.deltPeakJump ?? cfg.deltPeakJump,
     baselineReps: o.baselineReps ?? cfg.baselineReps,
-    baselineCap: o.baselineCap ?? cfg.baselineCap,
+    fallbackShareMax: o.fallbackShareMax ?? cfg.fallbackShareMax,
     fastUpMs: o.fastUpMs ?? cfg.fastUpMs,
   };
 }
