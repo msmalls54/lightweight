@@ -16,8 +16,13 @@ export const DEFAULT_SET: Omit<SetTemplate, "arms"> = { exercise: "dumbbell curl
 // 15 s, and the dashboard shows "set ends in N s" once SET_IDLE_WARN_MS have passed without a rep.
 export const ENGINE_CONFIG = { autoEndMs: 15_000, mvcPercentile: 0.99 } as const;
 export const SET_IDLE_WARN_MS = 8_000;
-/** A device time this far behind the newest sample seen = the UNO rebooted (its clock restarted), not a resend. */
-const DEVICE_RESET_MS = 60_000;
+/** A device time this far behind the newest sample seen = the UNO rebooted (its clock restarted), not a resend:
+ *  the firmware's queue holds 8.6 s, so a genuine resend is never more than ~10 s behind. */
+const DEVICE_RESET_MS = 20_000;
+/** Firmware resends at most its queue (43 batches); a seq further back than this is a new boot, not a resend. */
+const SEQ_RESEND_WINDOW = 200;
+/** Clock jitter between millis()-stamped batches; going back more than this while seq goes forward = reboot. */
+const CLOCK_BACK_MS = 1_000;
 /** Start set = a voiced countdown ("Pick them up. Three, two, one, curl!"); the set arms when it ends. */
 export const COUNTDOWN_MS = 6000;
 export const MVC_PERCENTILE = 0.99;
@@ -85,17 +90,23 @@ interface Sess {
 }
 
 /** Per device: the newest sample time ingested (device ms), and the smallest receive-minus-device offset. */
-interface DeviceTrack { endT: number; minOffset: number; lagMs: number; at: number }
+interface DeviceTrack { endT: number; lastSeq: number; minOffset: number; lagMs: number; at: number }
 
 /**
  * Coalesced POSTs and resends: drop the part of a batch that was already ingested (by device time, so a
  * repeated coalesced POST, or one that overlaps an earlier one, never feeds the same samples twice).
  * Returns the remaining batch, null if nothing new, and whether the device clock restarted.
  */
-export function trimIngested(b: Batch & { n_batches?: number }, endT: number | null): { batch: Batch | null; reset: boolean } {
+export function trimIngested(b: Batch & { n_batches?: number }, endT: number | null, lastSeq: number | null = null): { batch: Batch | null; reset: boolean } {
   const n = b.ch[0]?.length ?? 0;
   const bEnd = b.t0_ms + n * b.dt_ms;
   if (endT === null || n === 0) return { batch: n ? b : null, reset: false };
+  // Reboot (the device clock restarted): firmware 0.2.0 starts each boot's seq 1,000,000 higher, so the
+  // clock going back while seq goes forward is a new boot, however short the last one was (Nov 14 23:35:
+  // a 36 s boot followed by a reboot was trimmed as "already seen" until the new clock passed 36 s).
+  // Older firmware restarts seq at 0: a seq far behind the last one, or a clock far back, is a reboot too.
+  const clockBack = b.t0_ms < endT - CLOCK_BACK_MS;
+  if (clockBack && lastSeq !== null && (b.seq > lastSeq || lastSeq - b.seq > SEQ_RESEND_WINDOW)) return { batch: b, reset: true };
   if (b.t0_ms < endT - DEVICE_RESET_MS && bEnd < endT - DEVICE_RESET_MS) return { batch: b, reset: true };
   const skip = Math.max(0, Math.round((endT - b.t0_ms) / b.dt_ms));
   if (skip >= n) return { batch: null, reset: false };
@@ -130,22 +141,32 @@ export class Pipeline {
     // Guard: real hardware never feeds a fake-device session. A non-fake device with no open session,
     // or with a fake one open, gets a fresh live session for Mike (even while a replay is playing).
     const realDevice = !b0.device.startsWith("lw-fake");
-    const sess = this.live && !(realDevice && this.live.kind !== "live")
+    let sess = this.live && !(realDevice && this.live.kind !== "live")
       ? this.live
       : this.openSession({ person: "Mike", walkup: false, kind: realDevice ? "live" : "fake" });
     const dev = this.devices.get(b0.device);
-    const { batch, reset } = trimIngested(b0, dev ? dev.endT : null);
+    const lastB = b0.seq + (b0.n_batches ?? 1) - 1;
+    const { batch, reset } = trimIngested(b0, dev ? dev.endT : null, dev ? dev.lastSeq : null);
     if (!batch) return { duplicate: true };
+    if (reset) {
+      // The engine's clock can't go backwards: close this session (an open set ends with the reps it
+      // has) and continue in a fresh one with the same person/arms and the saved calibration, exactly
+      // like a server restart, but by itself, within one POST.
+      console.log(`[ingest] ${b0.device} rebooted (seq ${dev?.lastSeq} -> ${b0.seq}, t ${dev?.endT} -> ${b0.t0_ms} ms): new session`);
+      if (sess === this.live) sess = this.openSession({ person: sess.person, walkup: sess.isWalkUp, kind: sess.kind === "fake" ? "fake" : "live", arms: sess.arms });
+    }
     const b: Batch = { device: batch.device, seq: batch.seq, t0_ms: batch.t0_ms, dt_ms: batch.dt_ms, ch: batch.ch };
-    const id = this.store.saveBatch(sess.id, b);
-    if (id === null) return { duplicate: true };
-    sess.lastBatchId = id;
     const now = Date.now();
     // Device lag = receive time - device time of the newest sample, relative to the smallest seen
     // (the clocks' fixed offset cancels out). A reboot restarts the device clock: start over.
+    // The tracker advances even when the DB already has the batch (a resend from before a server
+    // restart), so a stored duplicate can never stall the device.
     const endT = b.t0_ms + b.ch[0].length * b.dt_ms, offset = now - endT;
     const minOffset = !dev || reset ? offset : Math.min(dev.minOffset, offset);
-    this.devices.set(b.device, { endT: Math.max(reset || !dev ? endT : dev.endT, endT), minOffset, lagMs: offset - minOffset, at: now });
+    this.devices.set(b.device, { endT: Math.max(reset || !dev ? endT : dev.endT, endT), lastSeq: reset || !dev ? lastB : Math.max(dev.lastSeq, lastB), minOffset, lagMs: offset - minOffset, at: now });
+    const id = this.store.saveBatch(sess.id, b);
+    if (id === null) return { duplicate: true };
+    sess.lastBatchId = id;
     this.lastBatchWall = now;
     this.batchTimes.push({ t: now, n: b.ch[0].length });
     while (this.batchTimes.length && this.batchTimes[0].t < now - 5000) this.batchTimes.shift();
