@@ -13,3 +13,4 @@ export {
   workoutFacts, workoutInputFromContext, fallbackSession, pickFocus, WORKING_SET_MIN_REPS, LONG_SET_MIN_REPS, WORKOUT_SPOKEN_MAX_WORDS,
   type SessionSummary, type WorkoutInput, type LoggedLift, type WorkoutFacts, type ExerciseFacts,
 } from "./session.js";
+export { buildClipSummary, coachVoiceExtras, summaryVoiceMode, CLIP_SUMMARY_MAX, SUMMARY_CLIP_KEYS, type SummaryVoiceMode } from "./clips.js";

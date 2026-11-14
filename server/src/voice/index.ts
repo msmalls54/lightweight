@@ -30,6 +30,20 @@ export const CLIPS: Record<string, string> = {
   // Instant set-end feedback (played right at set end while the summary TTS loads).
   all_clean: "Every rep clean.",
   no_cheats: "No cheat reps.",
+  // Backup voice: stitched set summaries from these clips when live TTS is late (coach/clips.ts).
+  word_and: "And",
+  right_shoulder_took_over: "Right shoulder took over.",
+  left_shoulder_took_over: "Left shoulder took over.",
+  both_shoulders_took_over: "Both shoulders took over.",
+  late_in_set: "Late in the set.",
+  from_the_start: "From the start.",
+  same_weight_keep_going: "Same weight, keep going.",
+  stop_first_cheat_next: "Stop at the first cheat next set.",
+  rest_longer: "Rest longer.",
+  slow_the_way_up: "Slow the way up.",
+  pin_your_elbows: "Pin your elbows.",
+  getting_cleaner: "Getting cleaner.",
+  getting_sloppier: "Getting sloppier.",
   a_bit_loose: "A bit loose. Tighten it up.",
   one_cheat: "One cheat rep.",
   two_cheats: "Two cheat reps.",
@@ -109,6 +123,9 @@ export interface InitVoiceOptions {
   synth?: Synth;
   /** Only generate these keys (smoke tests). Default: all CLIPS. */
   keys?: string[];
+  /** Tries per clip (default 2) and the first backoff in ms (doubles each retry, default 1500). */
+  attempts?: number;
+  backoffMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -143,17 +160,18 @@ export async function initVoice(opts: InitVoiceOptions): Promise<void> {
 
   const t0 = Date.now();
   await pool(todo, opts.concurrency ?? 4, async (key) => {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    const attempts = Math.max(1, opts.attempts ?? 2);
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
         const wav = trimSilence(await state.synth!(CLIPS[key]));
         fs.writeFileSync(clipPath(key), wav);
         manifest[key] = { text: CLIPS[key], voice, model: TTS_MODEL, trimmed: true };
         return;
       } catch (e) {
-        if (attempt === 2) {
+        if (attempt === attempts) {
           state.failed.push(key);
           log(`clip ${key} failed: ${(e as Error).message?.slice(0, 160)}`);
-        } else await sleep(1500);
+        } else await sleep((opts.backoffMs ?? 1500) * 2 ** (attempt - 1));
       }
     }
   });
@@ -174,6 +192,23 @@ export async function getClip(key: string): Promise<Buffer | null> {
   fs.mkdirSync(state.cacheDir, { recursive: true });
   fs.writeFileSync(f, wav);
   return wav;
+}
+
+/** "[voice] set X: gemini 3.4 s" / "[voice] set X: gemini failed (timeout) -> clips". */
+export function voiceLogLine(b: { set_id?: unknown; tier?: unknown; ms?: unknown; reason?: unknown }): string {
+  const id = String(b.set_id ?? "?").slice(0, 60);
+  const tier = String(b.tier ?? "?").slice(0, 20);
+  const ms = typeof b.ms === "number" && isFinite(b.ms) ? ` ${(b.ms / 1000).toFixed(1)} s` : "";
+  const reason = typeof b.reason === "string" && b.reason ? b.reason.slice(0, 80) : "";
+  return tier === "gemini" ? `[voice] set ${id}: gemini${ms}` : `[voice] set ${id}: ${reason || "backup"} -> ${tier}${ms}`;
+}
+
+/** Clip keys with no cached WAV yet. */
+export function missingClips(cacheDir = state.cacheDir): string[] {
+  return Object.keys(CLIPS).filter((k) => {
+    const f = path.join(cacheDir, `${k}.wav`);
+    return !(fs.existsSync(f) && fs.statSync(f).size > 44);
+  });
 }
 
 export function voiceStatus() {
@@ -278,6 +313,16 @@ export function registerVoiceRoutes(app: Hono<any, any, any>): void {
   app.get("/voice/clips", (c) => c.json({ ...voiceStatus(), keys: Object.keys(CLIPS), texts: CLIPS }));
   // The dashboard polls this; if it changes after the tab loaded, the tab's JS is stale -> "Reload this tab".
   app.get("/voice/build", (c) => c.json({ build: dashboardBuild() }, 200, { "cache-control": "no-store" }));
+  // The speaker tab reports which voice spoke for each set.
+  app.post("/voice/log", async (c) => {
+    try {
+      const b = (await c.req.json()) as { set_id?: unknown; tier?: unknown; ms?: unknown; reason?: unknown };
+      console.log(voiceLogLine(b));
+    } catch {
+      /* ignore */
+    }
+    return c.json({ ok: true });
+  });
 
   app.get("/voice/clip/:file", async (c) => {
     const key = c.req.param("file").replace(/\.wav$/i, "");
