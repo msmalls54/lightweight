@@ -105,6 +105,11 @@
   #calResult .good { color: var(--green); }
   #toast { position: fixed; right: 22px; top: 70px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 18px; display: none; z-index: 5; max-width: 480px; }
   #toast.show { display: block; }
+  #cd { position: fixed; inset: 0; background: #07090de0; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9; text-align: center; }
+  #cd.show { display: flex; }
+  #cdText { font-size: clamp(64px, 18vh, 200px); font-weight: 900; line-height: 1; color: var(--blue); font-variant-numeric: tabular-nums; }
+  #cdText.go { color: var(--green); }
+  #cdSub { font-size: clamp(20px, 3.5vh, 34px); color: var(--dim); margin-top: 16px; }
   /* Narrow windows: stack and let the page scroll instead of squeezing. */
   @media (max-width: 1000px), (max-height: 620px) {
     body { height: auto; min-height: 100vh; overflow: auto; }
@@ -164,7 +169,8 @@
     <select id="variant" aria-label="Variant"><option>standing</option><option>preacher</option><option>hammer</option></select>
     <input id="load" type="number" value="35" min="0" step="5" aria-label="Load lb"> lb
     <label><input type="checkbox" id="autoNext"> auto next</label>
-    <button id="btnStart" class="primary">Start set (S)</button>
+    <label title="After a set ends and the coach is done, wait 20 s, then count down the next set. Any key cancels."><input type="checkbox" id="handsFree" checked> hands-free loop</label>
+    <button id="btnStart" class="primary">Start set (S / Space)</button>
     <button id="btnStop">Stop set (X)</button>
   </div>
   <div class="grp"><b>Replay</b>
@@ -187,6 +193,7 @@
   <p><button id="calCancel" class="danger">Cancel</button> <button id="calClose" style="display:none" class="primary">Done</button></p>
 </div>
 <div id="toast"></div>
+<div id="cd"><div id="cdText"></div><div id="cdSub"></div><p><button id="cdCancel" class="danger">Cancel (X)</button></p></div>
 
 <script src="/voice-player.js" onerror="window.__lwNoVoice = true"></script>
 <script src="/app.js"></script>

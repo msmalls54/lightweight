@@ -10,7 +10,10 @@ export interface SetTemplate { exercise: string; variant: Variant; load_lb?: num
 export const DEFAULT_SET: Omit<SetTemplate, "arms"> = { exercise: "dumbbell curl", variant: "standing", load_lb: 35, auto_next: false };
 /** Live run Nov 14: 10 s pauses split real sets, and 0.95 of a short flex under-read the biceps MVC.
  *  The engine also raises the MVC to p99 of each finished set (autoRaiseMvc, on by default). */
-export const ENGINE_CONFIG = { autoEndMs: 30_000, mvcPercentile: 0.99 } as const;
+// Hands-free sets (Nov 14): a set ends 8 s after the last rep, so putting the weights down ends it.
+export const ENGINE_CONFIG = { autoEndMs: 8_000, mvcPercentile: 0.99 } as const;
+/** Start set = a voiced countdown ("Pick them up. Three, two, one, curl!"); the set arms when it ends. */
+export const COUNTDOWN_MS = 6000;
 export const MVC_PERCENTILE = 0.99;
 /** Auto-rest: 10th percentile of the last 5 s of idle samples, taken when a set is armed. */
 export const AUTO_REST = { windowMs: 5000, percentile: 0.1, minSamples: 200, minChange: 25 } as const;
@@ -68,6 +71,9 @@ interface Sess {
   sets: SetEndEvent[]; source?: string;
   /** Where the current calibration came from: saved (last session), calibrated (flex holds), auto (defaults + auto-rest/MVC). */
   calSource: CalSource;
+  /** When rest was last measured (countdown start), so arming a few seconds later doesn't re-measure it
+   *  while the lifter is already holding the weights. */
+  restTakenAt: number;
 }
 
 export class Pipeline {
@@ -186,7 +192,7 @@ export class Pipeline {
     const arms = o.arms ?? (o.walkup ? ["R"] : ["R", "L"]);
     const sess: Sess = {
       id: newId(o.kind === "replay" ? "replay" : "s"), person: o.person, isWalkUp: o.walkup, kind: o.kind, arms,
-      engine: new Engine(ENGINE_CONFIG), ring: new Ring(), calSource: "auto", calibration: null, calibrating: false, cal: { mvc: [null, null, null, null] },
+      engine: new Engine(ENGINE_CONFIG), ring: new Ring(), calSource: "auto", restTakenAt: 0, calibration: null, calibrating: false, cal: { mvc: [null, null, null, null] },
       armed: null, set: null, setNo: null, lastBatchId: 0, sets: [], source: o.source,
     };
     this.store.createSession({ session_id: sess.id, person: sess.person, is_walkup: sess.isWalkUp, kind: sess.kind, arms, source_session_id: o.source });
@@ -264,6 +270,7 @@ export class Pipeline {
   /** Rest drifts (sweat, pad settling): re-measure it from the idle samples right before a set. */
   private autoRest(sess: Sess) {
     if (sess.calibrating || Date.now() - sess.ring.lastWall > 1500) return;
+    if (Date.now() - sess.restTakenAt < 15_000) return; // measured at the countdown start
     const w = sess.ring.window(AUTO_REST.windowMs);
     if (w[0].length < AUTO_REST.minSamples) return;
     const base = sess.calibration ?? DEFAULT_CAL;
@@ -330,8 +337,43 @@ export class Pipeline {
 
   stopSet() {
     const sess = this.liveOrDefault();
+    this.cancelCountdown();
     this.cmdStopSet(sess);
     this.pushStatus();
+  }
+
+  // ------------------------------------------------------------------ hands-free start
+  countdown: { endsAt: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** Start set, hands-free: measure rest now (weights still down), count down, then arm. */
+  startCountdown(input: Partial<SetTemplate>, ms = COUNTDOWN_MS) {
+    const sess = this.liveOrDefault();
+    if (sess.calibrating) throw new HttpError(409, "Calibrating; wait for it to finish.");
+    this.cancelCountdown(false);
+    this.endCurrent(sess, false);
+    const tpl: SetTemplate = { ...DEFAULT_SET, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)), arms: input.arms ?? sess.arms };
+    this.log(sess, "set_prepare", null);
+    sess.restTakenAt = 0;
+    this.autoRest(sess);
+    sess.restTakenAt = Date.now();
+    const endsAt = Date.now() + ms;
+    this.countdown = {
+      endsAt,
+      timer: setTimeout(() => {
+        this.countdown = null;
+        if (this.live === sess && !this.replay) { this.cmdStartSet(sess, tpl); this.hub.send({ type: "countdown", phase: "go" }); }
+        this.pushStatus();
+      }, ms),
+    };
+    this.hub.send({ type: "countdown", phase: "start", ms, ends_at: endsAt });
+    this.pushStatus();
+    return { ends_at: endsAt, ms };
+  }
+  cancelCountdown(notify = true) {
+    if (!this.countdown) return false;
+    clearTimeout(this.countdown.timer);
+    this.countdown = null;
+    if (notify) this.hub.send({ type: "countdown", phase: "cancel" });
+    return true;
   }
 
   // ------------------------------------------------------------------ calibration
@@ -422,6 +464,7 @@ export class Pipeline {
     const p = JSON.parse(ev.payload);
     if (ev.kind === "set_start") { sess.armed = p; this.endCurrent(sess, false); sess.calibrating = false; this.arm(sess, p); }
     else if (ev.kind === "set_next") { sess.armed = p; }
+    else if (ev.kind === "set_prepare") { sess.restTakenAt = 0; this.autoRest(sess); sess.restTakenAt = Date.now(); }
     else if (ev.kind === "set_stop") { sess.armed = null; this.endCurrent(sess, false); }
     else if (ev.kind === "cal_begin") { this.applyCalBegin(sess); this.hub.send({ type: "calibration", phase: "begin", arms: sess.arms, replay: true }); }
     else if (ev.kind === "calibration") { this.store.saveCalibration(sess.id, p); this.applyCalDone(sess, p); this.hub.send({ type: "calibration", phase: "done", ...p, replay: true }); }
@@ -481,6 +524,7 @@ export class Pipeline {
       session: s ? { id: s.id, person: s.person, walkup: s.isWalkUp, kind: s.kind, arms: s.arms, calibrated: !!s.calibration, cal_source: s.calSource, mvc: s.calibration?.mvc ?? null, calibrating: s.calibrating, cal_problems: s.calibration?.problems ?? [], sets_done: s.sets.length } : null,
       set: s?.set ? { set_id: s.set.set_id, set_no: s.setNo, exercise: s.set.exercise, variant: s.set.variant, load_lb: s.set.load_lb ?? null, arms: s.set.arms } : null,
       armed: s?.armed ?? null,
+      countdown_ms_left: this.countdown ? Math.max(0, this.countdown.endsAt - now) : null,
       replay: this.replay ? { source: this.replay.source, i: this.replay.i, n: this.replay.n, speed: this.replay.speed } : null,
       dashboards: this.hub.size,
     };

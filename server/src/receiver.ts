@@ -4,7 +4,8 @@ import { bodyLimit } from "hono/body-limit";
 import { batchSchema, heartbeatSchema } from "./schemas.js";
 import type { Pipeline } from "./pipeline.js";
 
-export const LOCAL_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"];
+const PORT = Number(process.env.PORT) || 3000;
+export const LOCAL_ORIGINS = [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`, `http://[::1]:${PORT}`];
 export const AGENT_ORIGINS = ["https://chatgpt.com", "https://chat.openai.com", "https://claude.ai"];
 export function originAllowed(origin: string | undefined, publicOrigin?: string | null) {
   return !origin || [...LOCAL_ORIGINS, ...AGENT_ORIGINS, ...(publicOrigin ? [publicOrigin] : [])].includes(origin);

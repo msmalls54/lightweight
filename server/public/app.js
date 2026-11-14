@@ -247,8 +247,11 @@
       $("who").innerHTML = `${esc(ss.person)}${ss.walkup ? " <small>walk-up</small>" : ""} <small>${ss.calibrating ? "calibrating…" : `calibration: ${ss.cal_source === "saved" ? "saved" : ss.cal_source === "calibrated" ? "calibrated" : "auto"}${ss.cal_problems?.length ? " ⚠" : ""}${mvcText(ss.mvc)}`}</small>`;
     } else $("who").textContent = "No session";
     const armed = !!s.set && !ss?.calibrating;
-    $("armState").className = `armstate ${armed ? "armed" : "idle"}`;
-    $("armState").textContent = armed ? (s.set.set_no ? `● SET ${s.set.set_no} RUNNING` : "● ARMED · curl to start") : ss?.calibrating ? "CALIBRATING" : "IDLE · press Start set (S)";
+    if (s.countdown_ms_left != null) { $("armState").className = "armstate armed"; $("armState").textContent = "COUNTDOWN · pick them up"; }
+    else if (!loopTimer) {
+      $("armState").className = `armstate ${armed ? "armed" : "idle"}`;
+      $("armState").textContent = armed ? (s.set.set_no ? `● SET ${s.set.set_no} RUNNING` : "● ARMED · curl to start") : ss?.calibrating ? "CALIBRATING" : "IDLE · press Start set (S / Space)";
+    }
     if (s.set) {
       $("setmeta").textContent = `${s.set.exercise} · ${s.set.variant}${s.set.load_lb != null ? ` · ${s.set.load_lb} lb` : ""} · ${s.set.arms.join("+")} · set armed${s.set.set_no ? ` (#${s.set.set_no})` : ", waiting for first rep"}`;
     } else $("setmeta").textContent = ss?.calibrating ? "Calibrating…" : "No set armed. Press Start set.";
@@ -268,6 +271,95 @@
     try { window.LWAudio?.unlock?.(); } catch { /* ignore */ }
   });
 
+  // ------------------------------------------------------------ hands-free countdown
+  // Start set = a server-timed countdown ("Pick them up. Three, two, one, curl!"); the set arms at 0,
+  // so picking the weights up never counts. Only the speaker tab plays the voice.
+  const LEAD_TEXT = "Pick them up. Three, two, one, curl!";
+  let lead = null; // { audio, ms } preloaded once on the speaker tab (the server caches the TTS)
+  function preloadCountdownVoice() {
+    if (lead || silent()) return;
+    lead = { audio: null, ms: 0 };
+    fetch("/voice/say", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: LEAD_TEXT }) })
+      .then(r => (r.ok ? r.blob() : null)).then(b => {
+        if (!b) { lead = null; return; }
+        const a = new Audio(URL.createObjectURL(b));
+        a.addEventListener("loadedmetadata", () => { lead.ms = Math.round((a.duration || 0) * 1000); });
+        lead.audio = a;
+      }).catch(() => { lead = null; });
+  }
+  let cdTimer = null, cdVoiceTimer = null;
+  function playCountdownVoice(msLeft) {
+    if (silent()) { console.info("[say]", LEAD_TEXT); return; }
+    if (!lead?.audio) { say(LEAD_TEXT); return; }
+    const a = lead.audio, music = $("music");
+    // End the voice on "curl!" right when the set arms; duck the music while it talks.
+    cdVoiceTimer = setTimeout(() => {
+      const vol = music.volume, playing = !music.paused;
+      if (playing) music.volume = Math.min(vol, 0.25);
+      a.currentTime = 0;
+      a.play().catch(() => {}).finally(() => {});
+      a.onended = () => { if (playing) music.volume = vol; };
+    }, Math.max(0, msLeft - lead.ms - 150));
+  }
+  function showCountdown(endsAt) {
+    clearInterval(cdTimer);
+    $("cd").classList.add("show");
+    const tick = () => {
+      const left = endsAt - Date.now();
+      const t = $("cdText");
+      if (left > 3000) { t.textContent = "PICK THEM UP"; t.className = ""; $("cdSub").textContent = "Set starts on CURL. Weights up now."; }
+      else if (left > 0) { t.textContent = String(Math.ceil(left / 1000)); t.className = ""; $("cdSub").textContent = "Get ready…"; }
+      else { t.textContent = "CURL!"; t.className = "go"; $("cdSub").textContent = ""; }
+    };
+    tick();
+    cdTimer = setInterval(tick, 100);
+  }
+  function hideCountdown(delay = 0) {
+    setTimeout(() => { clearInterval(cdTimer); clearTimeout(cdVoiceTimer); $("cd").classList.remove("show"); }, delay);
+  }
+  function onCountdown(e) {
+    if (e.phase === "start") { cancelLoop(); showCountdown(e.ends_at); playCountdownVoice(e.ms); }
+    else if (e.phase === "go") hideCountdown(900);
+    else hideCountdown();
+  }
+
+  // Hands-free loop: after a set ends and the coach is done talking, wait 20 s, then count down the
+  // next set. Runs on the speaker tab (or any tab when nobody is the speaker). Any key/click cancels.
+  let hasSpeaker = false, loopTimer = null, loopEndsAt = 0, waitingSet = null, waitTimer = null;
+  const controller = () => isSpeaker || !hasSpeaker;
+  function cancelLoop() {
+    const was = !!(loopTimer || waitTimer);
+    clearInterval(loopTimer); clearTimeout(waitTimer); loopTimer = null; waitTimer = null; waitingSet = null;
+    if (was && lastStatus) onStatus(lastStatus);
+    return was;
+  }
+  function scheduleNext() {
+    clearTimeout(waitTimer); waitTimer = null;
+    if (!$("handsFree").checked || !controller()) return;
+    loopEndsAt = Date.now() + 20_000;
+    clearInterval(loopTimer);
+    loopTimer = setInterval(() => {
+      const left = loopEndsAt - Date.now();
+      $("armState").className = "armstate idle";
+      $("armState").textContent = `NEXT SET IN ${Math.max(0, Math.ceil(left / 1000))} s · any key cancels`;
+      if (left <= 0) { cancelLoop(); startSet(); }
+    }, 250);
+  }
+  function loopAfterSet(e) {
+    cancelLoop();
+    if (!$("handsFree").checked || !controller()) return;
+    waitingSet = e.set_id;
+    if (e.too_short) return scheduleNext();
+    waitTimer = setTimeout(scheduleNext, 20_000); // coach line never came: go on anyway
+  }
+  async function loopAfterCoach(setId) {
+    if (waitingSet !== setId) return;
+    await sleep(1000);
+    for (let i = 0; i < 80 && window.LWAudio?.isSpeaking?.(); i++) await sleep(250); // let the coach finish
+    if (waitingSet === setId) scheduleNext();
+  }
+  for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, () => { cancelLoop(); }, true);
+
   // ------------------------------------------------------------ SSE
   let es;
   function connect() {
@@ -280,18 +372,20 @@
         case "live": live = e.pct; liveAt = performance.now(); break;
         case "status": onStatus(e); break;
         case "hello": clientId = e.client_id; break;
-        case "speaker": isSpeaker = !!e.you; renderSpeaker(e.has_speaker); break;
+        case "speaker": isSpeaker = !!e.you; hasSpeaker = !!e.has_speaker; renderSpeaker(e.has_speaker); if (isSpeaker) preloadCountdownVoice(); break;
         case "history":
           $("feed").innerHTML = ""; currentSetId = null; setState = newSet();
           if (staleId) { renderIdle(); break; } // old fake/replay/stale run: don't show its reps
           for (const r of e.reps) onRep(r, false);
           break;
         case "rep": clearStale(); onRep(e, true); break;
-        case "set_end": clearStale(); onSetEnd(e); break;
+        case "set_end": clearStale(); onSetEnd(e); loopAfterSet(e); break;
+        case "countdown": onCountdown(e); break;
         case "coach":
           if (e.too_short) break;
           if (e.text) { $("coach").textContent = e.text; say(e.text); }
           else { $("coach").textContent = ""; playClip(e.fallback_clip); }
+          loopAfterCoach(e.set_id);
           break;
         case "calibration": clearStale(); onCalEvent(e); break;
         case "calibrate_request": calibrate(); break;
@@ -414,11 +508,12 @@
     await post("/session/start", { person: name, walkup: true, arms: ["R"] });
   });
   $("btnCal").onclick = () => calibrate();
-  const startSet = run(() => post("/set/start", {
+  const startSet = run(() => post("/set/countdown", {
     exercise: $("exercise").value || "dumbbell curl", variant: $("variant").value,
     load_lb: Number($("load").value) || undefined, arms: arms(), auto_next: $("autoNext").checked,
   }));
-  const stopSet = run(() => post("/set/stop"));
+  const stopSet = run(() => { cancelLoop(); return post("/set/stop"); });
+  $("cdCancel").onclick = stopSet;
   $("btnStart").onclick = startSet;
   $("btnStop").onclick = stopSet;
   $("btnReplay").onclick = run(async () => {
@@ -430,7 +525,8 @@
   document.addEventListener("keydown", e => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
-    if (k === "c") calibrate(); else if (k === "s") startSet(); else if (k === "x") stopSet();
+    if (k === " " || k === "spacebar") e.preventDefault();
+    if (k === "c") calibrate(); else if (k === "s" || k === " " || k === "spacebar") startSet(); else if (k === "x") stopSet();
   });
 
   async function loadSessions() {
