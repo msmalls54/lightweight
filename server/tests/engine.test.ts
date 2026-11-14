@@ -514,3 +514,29 @@ test("autoRaiseMvc: set_end raises the MVC from the set itself (raise-only), off
   assert.equal(runSet(off, presets.clean(4)).end.calibration, undefined);
   assert.equal(off.getCalibration()!.mvc[0], 6000);
 });
+
+test("pinned delt (saturated on clean reps): high-baseline reference, no false cheats, delt_saturated", () => {
+  // delt pad far forward: the delt hits the ceiling on every clean rep (up ratio ~1.5, "blatant" by the no-ref rule)
+  const reps: SynthRep[] = Array.from({ length: 8 }, () => ({ bi: 0.8, delt: 1.3 }));
+  const { end } = runSet(calibrated(), reps);
+  assert.equal(end.reps.length, 8);
+  assert.equal(end.cheats, 0);
+  assert.deepEqual(end.delt_saturated, ["R"]);
+  assert.ok(end.reps[2].baseline_up_delt_ratio != null, "reference formed from the pinned first reps");
+});
+
+test("gradual fatigue rise is not a cheat (loose at most); an abrupt jump still is", () => {
+  // delt creeps up a little every rep: 0.10 -> ~0.46 over 10 reps
+  const gradual: SynthRep[] = Array.from({ length: 10 }, (_, i) => ({ bi: 0.8, delt: 0.1 + 0.04 * i }));
+  const g = runSet(calibrated(), gradual).end;
+  assert.equal(g.reps.length, 10);
+  assert.equal(g.cheats, 0, g.reps.map((r) => `${r.rep}:${r.up_delt_ratio}/${r.baseline_up_delt_ratio}:${r.loose ? "L" : ""}`).join(" "));
+  // abrupt: clean, clean, clean, then the delt jumps
+  const abrupt: SynthRep[] = [...presets.clean(4), { bi: 0.8, delt: 0.5 }, { bi: 0.8, delt: 0.5 }];
+  const a = runSet(calibrated(), abrupt).end;
+  assert.deepEqual(a.reps.map((r) => r.cheat), [false, false, false, false, true, true]);
+});
+
+test("set_end has no delt_saturated with a normal pad", () => {
+  assert.equal(runSet(calibrated(), presets.clean(6)).end.delt_saturated, undefined);
+});

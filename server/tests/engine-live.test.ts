@@ -178,3 +178,36 @@ test("live run 3: all 7 slow bilateral reps counted, set auto-ends 8 s after the
   assert.ok(endAt! - lastEnd >= 7.5 && endAt! - lastEnd <= 9, `set_end ${endAt} vs last rep end ${lastEnd.toFixed(1)}`);
   assert.equal(endReps, reps.length);
 });
+
+// ---------------------------------------------------------------------------------------------
+// Live run 4 (Nov 14, s-1114-140601-kau): 9 reps Mike intended clean. The R delt pad was re-stuck further
+// forward and SATURATES on every rep; the L delt climbs with fatigue. The engine flagged 3 (reps 6, 7 L; 9 R).
+const CSV4 = new URL("../../data/coach/history/raw/2026-11-14-live4-200hz-9-clean-reps.csv", import.meta.url);
+const rows4 = readFileSync(CSV4, "utf8").trim().split(/\r?\n/).slice(1).filter((l) => l.trim()).map((l) => l.split(",").map(Number));
+const CAL4: Calibration = { rest: [539, 477, 735, 609], mvc: [14969, 14958, 14948, 12969], ok: true, problems: [] };
+
+test("live run 4: 9 clean reps with a pinned R delt and a fatiguing L delt -> 0 cheats", () => {
+  const e = new Engine({ autoEndMs: 8_000, mvcPercentile: 0.99 });
+  e.setCalibration(CAL4);
+  let armed = false;
+  let end: SetEndEvent | null = null;
+  for (let i = 0; i < rows4.length; i += 40) {
+    const b = rows4.slice(i, i + 40);
+    if (!armed && b[0][0] >= 7_829_060) { // set_start (after batch t0 7,828,860)
+      e.startSet({ session_id: "kau", set_id: "set", person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R", "L"] });
+      armed = true;
+    }
+    for (const ev of e.ingest({ device: "lw-uno-1", seq: i / 40, t0_ms: b[0][0], dt_ms: 5, ch: [1, 2, 3, 4].map((c) => b.map((r) => r[c])) })) {
+      if (ev.type === "set_end" && !end) end = ev;
+    }
+  }
+  end ??= e.endSet();
+  assert.ok(end);
+  assert.equal(end!.reps.length, 9);
+  assert.equal(end!.cheats, 0, end!.reps.map((r) => `${r.rep}:${r.arm}:${r.cheat_reason}`).join(" "));
+  assert.ok(end!.reps.filter((r) => r.loose).length <= 2);
+  assert.deepEqual(end!.delt_saturated, ["R"]); // tell Mike to move the R pad
+  // R: the reference forms from the pinned first reps (high baseline) instead of never forming
+  assert.ok(end!.reps.slice(2).every((r) => r.arm_detail?.R?.ref_up_delt_ratio != null));
+  assert.ok(end!.reps.every((r) => r.arm_detail?.R && r.arm_detail?.L));
+});

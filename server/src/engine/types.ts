@@ -20,6 +20,16 @@ export interface RepEvent {
   up_delt_ratio?: number;
   /** Additive: the clean reference's up_delt_ratio (null = no reference yet). */
   baseline_up_delt_ratio?: number | null;
+  /** Additive: above the set's first clean reps but within a slowly rising (fatigue) trend. Not a cheat. */
+  loose?: boolean;
+  /** Additive: per working arm, the numbers and verdict behind the call. */
+  arm_detail?: Partial<Record<Arm, ArmDetail>>;
+}
+export interface ArmDetail {
+  verdict: "clean" | "loose" | "cheat";
+  cheat_reason: RepEvent["cheat_reason"];
+  delt_share: number; up_delt_ratio: number; delt_peak: number; delt_sat_ms: number;
+  ref_delt_share: number | null; ref_up_delt_ratio: number | null; ref_delt_peak: number | null;
 }
 /** Load NEVER changes (35 lb constant). */
 export interface CoachDecision { next: "continue" | "stop_at_first_cheat_rest_longer" | "slow_the_tempo"; reason: string }
@@ -27,6 +37,8 @@ export interface SetEndEvent {
   type: "set_end"; set_id: string; reps: RepEvent[]; clean: number; cheats: number; first_cheat_rep: number | null; decision: CoachDecision;
   /** Additive: present when autoRaiseMvc raised the MVC from this set. Already applied; persist it if you store calibrations. */
   calibration?: Calibration;
+  /** Additive: arms whose front delt sat at the ceiling on most clean reps (move that pad / turn its gain down). */
+  delt_saturated?: Arm[];
 }
 export type EngineEvent = LiveFrame | RepEvent | SetEndEvent;
 

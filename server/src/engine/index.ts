@@ -1,6 +1,7 @@
 // Public API of the signal engine (BUILD.md "② Signal engine API"). Pure TypeScript, no I/O.
 export { CH } from "./types.js";
 export type {
+  ArmDetail,
   Arm,
   Variant,
   Batch,
