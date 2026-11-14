@@ -7,7 +7,12 @@ import type { Heartbeat } from "./schemas.js";
 
 export const ENV_CEILING = 14960;
 export interface SetTemplate { exercise: string; variant: Variant; load_lb?: number; arms: Arm[]; auto_next: boolean }
-export const DEFAULT_SET: Omit<SetTemplate, "arms"> = { exercise: "dumbbell curl", variant: "standing", load_lb: 35, auto_next: true };
+export const DEFAULT_SET: Omit<SetTemplate, "arms"> = { exercise: "dumbbell curl", variant: "standing", load_lb: 35, auto_next: false };
+/** Live run Nov 14: 10 s pauses split real sets, and 0.95 of a short flex under-read the biceps MVC. */
+export const ENGINE_CONFIG = { setEndGapMs: 30_000, mvcPercentile: 0.99 } as const;
+export const MVC_PERCENTILE = 0.99;
+/** Fewer distinct reps than this: no coach summary ("set too short"). */
+export const MIN_REPS_FOR_SUMMARY = 3;
 
 export class HttpError extends Error { constructor(readonly status: 400 | 404 | 409, message: string) { super(message); } }
 
@@ -18,7 +23,7 @@ function newId(prefix: string) {
 }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
-const p95 = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length * 0.95)] : 0; };
+const pctl = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * p))] : 0; };
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timed out after ${ms} ms`)), ms))]);
 }
@@ -49,6 +54,8 @@ interface Sess {
   calibration: Calibration | null; calibrating: boolean; cal: { rest?: number[][]; mvc: (number[] | null)[] };
   armed: SetTemplate | null; set: SetContext | null; setNo: number | null; lastBatchId: number;
   sets: SetEndEvent[]; source?: string;
+  /** Raw samples of the current set (for raiseMvc at set end). */
+  setRaw: number[][];
 }
 
 export class Pipeline {
@@ -89,6 +96,7 @@ export class Pipeline {
 
   private process(sess: Sess, b: Batch) {
     sess.ring.push(b);
+    if (sess.set && sess.setRaw[0].length < 200 * 300) for (let k = 0; k < 4; k++) sess.setRaw[k].push(...b.ch[k]);
     let events: EngineEvent[];
     try { events = sess.engine.ingest(b); } catch (e) { console.error("[engine] ingest failed:", errMsg(e)); return; }
     for (const e of events) this.handle(sess, e);
@@ -125,11 +133,31 @@ export class Pipeline {
     }
     this.store.endSet(e);
     sess.sets.push(e);
+    this.selfCorrectMvc(sess);
+    const nReps = new Set(e.reps.map(r => r.rep)).size;
+    const short = nReps < MIN_REPS_FOR_SUMMARY;
     let cue: string | null = null;
-    try { cue = pickSetEndCue(e); } catch (err) { console.error("[coach] pickSetEndCue failed:", errMsg(err)); }
-    this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null, cue });
-    void this.coach(sess, e);
+    if (!short) try { cue = pickSetEndCue(e); } catch (err) { console.error("[coach] pickSetEndCue failed:", errMsg(err)); }
+    this.hub.send({ ...e, set_no: setNo, session_id: sess.id, exercise: ctx?.exercise ?? null, load_lb: ctx?.load_lb ?? null, cue, n_reps: nReps, too_short: short });
+    if (short) this.hub.send({ type: "coach", set_id: e.set_id, text: null, too_short: true, n_reps: nReps });
+    else void this.coach(sess, e);
     this.writeHistory(sess); // also at session end; per set so a crash never loses the day
+  }
+
+  /** MVC self-corrects from real curls: raise (never lower) each channel to p99 of the set's raw samples. */
+  private selfCorrectMvc(sess: Sess) {
+    const raw = sess.setRaw;
+    sess.setRaw = [[], [], [], []];
+    if (!sess.calibration || raw[0].length < 100) return;
+    try {
+      const before = sess.calibration.mvc;
+      const cal = sess.engine.raiseMvc([raw], MVC_PERCENTILE);
+      if (cal.mvc.every((m, i) => m === before[i])) return;
+      sess.calibration = cal;
+      if (sess.kind !== "replay") this.store.saveCalibration(sess.id, cal);
+      console.log(`[cal] ${sess.id} MVC raised from the set: ${before.join("/")} -> ${cal.mvc.join("/")}`);
+      this.hub.send({ type: "calibration", phase: "raised", before, ...cal });
+    } catch (err) { console.error("[engine] raiseMvc failed:", errMsg(err)); }
   }
 
   private async coach(sess: Sess, e: SetEndEvent) {
@@ -152,7 +180,7 @@ export class Pipeline {
     const arms = o.arms ?? (o.walkup ? ["R"] : ["R", "L"]);
     const sess: Sess = {
       id: newId(o.kind === "replay" ? "replay" : "s"), person: o.person, isWalkUp: o.walkup, kind: o.kind, arms,
-      engine: new Engine(), ring: new Ring(), calibration: null, calibrating: false, cal: { mvc: [null, null, null, null] },
+      engine: new Engine(ENGINE_CONFIG), ring: new Ring(), setRaw: [[], [], [], []], calibration: null, calibrating: false, cal: { mvc: [null, null, null, null] },
       armed: null, set: null, setNo: null, lastBatchId: 0, sets: [], source: o.source,
     };
     this.store.createSession({ session_id: sess.id, person: sess.person, is_walkup: sess.isWalkUp, kind: sess.kind, arms, source_session_id: o.source });
@@ -169,8 +197,7 @@ export class Pipeline {
     const sess = this.newSess(o);
     this.live = sess;
     console.log(`[session] ${sess.id} ${sess.person}${sess.isWalkUp ? " (walk-up)" : ""} arms=${sess.arms.join("+")} kind=${sess.kind}`);
-    // Arm a default set right away so reps count even if nobody touches the dashboard.
-    this.cmdStartSet(sess, { ...DEFAULT_SET, arms: sess.arms });
+    // No set is armed here: a set starts only on Start set (dashboard S / MCP log_exercise).
     if (!this.replay) this.hub.send({ type: "session", session_id: sess.id, person: sess.person, walkup: sess.isWalkUp, arms: sess.arms });
     this.pushStatus();
     return sess;
@@ -216,6 +243,7 @@ export class Pipeline {
     sess.engine.startSet(ctx);
     sess.set = ctx;
     sess.setNo = null;
+    sess.setRaw = [[], [], [], []];
   }
 
   private cmdStartSet(sess: Sess, tpl: SetTemplate) {
@@ -248,7 +276,7 @@ export class Pipeline {
     const sess = this.liveOrDefault();
     const clean = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as Partial<SetTemplate>;
     const tpl: SetTemplate = { ...(sess.armed ?? { ...DEFAULT_SET, arms: sess.arms }), ...clean };
-    if (!sess.set || sess.setNo === null) { this.cmdStartSet(sess, tpl); this.pushStatus(); return { applies: "now" as const, template: tpl }; }
+    if (sess.set && sess.setNo === null) { this.cmdStartSet(sess, tpl); this.pushStatus(); return { applies: "now" as const, template: tpl }; }
     this.log(sess, "set_next", tpl);
     sess.armed = tpl;
     this.pushStatus();
@@ -287,7 +315,7 @@ export class Pipeline {
     if (w[0].length < 20) throw new HttpError(409, `Only ${w[0].length} samples in the window; wait for the device.`);
     if (step === "rest") sess.cal.rest = w;
     else sess.cal.mvc[ch!] = w[ch!];
-    const level = step === "rest" ? w.map(median) : [p95(w[ch!])];
+    const level = step === "rest" ? w.map(median) : [Math.round(pctl(w[ch!], MVC_PERCENTILE))];
     this.hub.send({ type: "calibration", phase: "captured", step, ch: ch ?? null, level, samples: w[0].length });
     return { step, ch: ch ?? null, samples: w[0].length, level };
   }
@@ -313,9 +341,7 @@ export class Pipeline {
     sess.engine.setCalibration(cal);
     sess.calibration = cal;
     sess.calibrating = false;
-    if (!sess.armed) sess.armed = { ...DEFAULT_SET, arms: sess.arms };
-    this.maybeRearm(sess);
-    if (!sess.set) this.arm(sess, sess.armed);
+    this.maybeRearm(sess); // only re-arms when auto next is on (old sessions replay this way)
   }
   calCancel() {
     const sess = this.liveOrDefault();

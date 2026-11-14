@@ -34,11 +34,11 @@ export const setStartSchema = z.object({
   variant: variantSchema.default("standing"),
   load_lb: z.number().finite().min(0).max(500).optional(),
   arms: armsSchema.optional(),
-  auto_next: z.boolean().default(true),
+  auto_next: z.boolean().default(false),
 });
 
 export const captureSchema = z.object({
   step: z.enum(["rest", "mvc"]),
   ch: z.number().int().min(0).max(3).optional(),
-  window_ms: z.number().int().min(500).max(5000).default(2500),
+  window_ms: z.number().int().min(500).max(5000).default(3500),
 }).refine(c => c.step === "rest" || c.ch !== undefined, { message: "mvc capture needs ch", path: ["ch"] });
