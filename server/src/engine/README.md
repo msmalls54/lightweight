@@ -25,6 +25,15 @@ for (const ev of engine.ingest(batch)) { /* "live" | "rep" | "set_end" */ }
 const end = engine.endSet();                       // null if no set is running
 ```
 
+**Raising the MVC from real reps (additive, not in BUILD.md).** A 3 s FLEX hold undershoots what curls reach: 10,000 vs ~14,900 on Nov 14. Pool it with the first strict set:
+```ts
+import { mvcFromWindows, raiseMvc } from "./engine/index.js";
+mvcFromWindows([flexWin, strictSetWin]);          // pure: per-channel p95 of all samples pooled (4 arrays per window)
+const cal2 = raiseMvc(cal, [strictSetWin]);       // pure: MVC raised where the windows go higher, never lowered
+engine.setCalibration(cal2);                      // or: engine.raiseMvc([strictSetWin])
+```
+`setCalibration` rescales the clean references already learned this session (they're in %MVC), so the next set is judged consistently; tested on the Nov 14 right-arm file. Call it between sets. Over a whole set (rest samples included), p95 gives ~12,900 for that file; pass `percentile` 0.98–0.99 to get closer to the peaks.
+
 Behavior worth knowing:
 - **Before calibration** pct uses rest 550 / MVC 14960. Calibration channels that fail the checks also fall back to those defaults, so a dead pad reads ~0 instead of garbage.
 - **Calibration math:** rest = median of the rest window. MVC = 95th percentile of that muscle's flex window. `pct = clamp((x-rest)/(mvc-rest), 0, 1.5)`. A channel is rejected if `mvc-rest < 1000` (dead/bad pad) or rest > 4000 (not relaxed, or the Link Shield is on RAW, which sits around 8150).

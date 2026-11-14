@@ -235,3 +235,38 @@ for (const [name, mvc] of Object.entries(CALS_R35)) {
     assert.ok(shareMin - shareMax < 0.15, `share gap ${shareMin - shareMax}`);
   });
 }
+
+test("real 35 lb right arm: MVC from the FLEX hold, raised from the first strict set before the swings", () => {
+  const e = new Engine();
+  e.setCalibration({ rest: [550, 620, 800, 900], mvc: [10000, 14300, 14960, 14960], ok: true, problems: [] });
+  const sets: Record<string, SetEndEvent> = {};
+  let cur = "";
+  let strictRaw: number[][] = [[], [], [], []];
+  rowsR35.forEach((r, i) => {
+    if ((r.ph === "STRICT" || r.ph === "CHEAT") && r.ph !== cur) {
+      const prev = e.endSet();
+      if (prev) sets[prev.set_id] = prev;
+      if (r.ph === "CHEAT") {
+        const cal = e.raiseMvc([strictRaw]);
+        assert.ok(cal.mvc[0] > 12000, `biceps MVC raised from 10000 to ${cal.mvc[0]}`); // p95 of the whole set, rest samples included
+        assert.equal(cal.mvc[1], 14300, "delt MVC kept (the strict set never beats the raise hold)");
+      }
+      e.startSet({ session_id: "nov14r", set_id: r.ph, person: "Mike", exercise: "dumbbell curl", variant: "standing", load_lb: 35, arms: ["R"] });
+      cur = r.ph;
+    }
+    if (cur === "STRICT") r.ch.forEach((x, c) => strictRaw[c].push(x));
+    const dt = i + 1 < rowsR35.length ? rowsR35[i + 1].t - r.t : 50;
+    for (const ev of e.ingest({ device: "nov14r", seq: i, t0_ms: r.t, dt_ms: dt, ch: r.ch.map((x) => [x]) })) {
+      if (ev.type === "set_end") sets[ev.set_id] = ev;
+    }
+  });
+  const last = e.endSet();
+  if (last) sets[last.set_id] = last;
+  assert.equal(sets.STRICT.reps.length, 5);
+  assert.equal(sets.STRICT.cheats, 0);
+  assert.equal(sets.CHEAT.reps.length, 3);
+  assert.equal(sets.CHEAT.cheats, 3, sets.CHEAT.reps.map((r) => `${r.up_delt_ratio}/${r.baseline_up_delt_ratio}`).join(" "));
+  // rescaled reference ~= what the ceiling-MVC run learns directly (0.71)
+  const ref = sets.CHEAT.reps[0].baseline_up_delt_ratio!;
+  assert.ok(ref > 0.6 && ref < 0.85, `rescaled ref ${ref}`);
+});

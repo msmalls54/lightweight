@@ -1,7 +1,7 @@
 // The signal engine: raw batches in, live frames / reps / set ends out. Pure code, no I/O.
 // Code decides cheats; the LLM only explains them.
 
-import { computeCalibration, effectiveScale, toPct } from "./calibration.js";
+import { computeCalibration, effectiveScale, raiseMvc, toPct } from "./calibration.js";
 import { resolveConfig, thresholdsFor, type EngineConfig, type RepThresholds } from "./config.js";
 import {
   ARM_CH,
@@ -62,6 +62,20 @@ function upRatio(w: Sample[], arm: Arm, biPeak: number, from: number): number {
   return b > EPS ? d / b : 0;
 }
 
+/** A reference measured under one calibration, expressed under another (biceps pct x kb, delt pct x kd). */
+function rescaleRef(r: Ref, kb: number, kd: number): Ref {
+  const d = r.deltMean;
+  const b = r.share > EPS ? (d * (1 - r.share)) / r.share : 0;
+  const d2 = d * kd;
+  const b2 = b * kb;
+  return {
+    share: d2 + b2 > EPS ? d2 / (d2 + b2) : r.share,
+    deltMean: d2,
+    deltPeak: r.deltPeak * kd,
+    upRatio: kb > EPS ? (r.upRatio * kd) / kb : r.upRatio,
+  };
+}
+
 /**
  * Cheat call for one arm's rep, against that arm's clean reference (null = no clean reps yet).
  * - delt_share_jump ("delt took over"), any of:
@@ -114,9 +128,43 @@ export class Engine {
     return c;
   }
 
+  /**
+   * Also rescales the clean references already learned this session (they're in %MVC), so raising
+   * the MVC between sets (see raiseMvc) doesn't turn the next set's reps into false cheats.
+   */
   setCalibration(c: Calibration): void {
+    const old = this.scale;
     this.cal = { rest: [...c.rest], mvc: [...c.mvc], ok: c.ok, problems: [...c.problems] };
     this.scale = effectiveScale(this.cal, this.cfg);
+    const k = old.span.map((s, i) => s / this.scale.span[i]); // new pct ~= old pct * k
+    if (k.every((x) => Math.abs(x - 1) < 1e-9)) return;
+    const scaleFor = (arm: Arm) => ({ kb: k[ARM_CH[arm].bi], kd: k[ARM_CH[arm].delt] });
+    for (const [key, ref] of this.sessionRefs.refs) {
+      const { kb, kd } = scaleFor(key[0] as Arm);
+      this.sessionRefs.refs.set(key, rescaleRef(ref, kb, kd));
+    }
+    if (this.set) {
+      for (const arm of ["R", "L"] as const) {
+        const { kb, kd } = scaleFor(arm);
+        this.set.armReps[arm] = this.set.armReps[arm].map((r) => ({ ...rescaleRef(r, kb, kd), flagged: r.flagged }));
+      }
+    }
+  }
+
+  /**
+   * Raises the MVC from extra raw windows (e.g. the first strict set's samples) and applies it.
+   * Same as setCalibration(raiseMvc(current, windows)). Returns the new calibration.
+   */
+  raiseMvc(windows: number[][][], percentile?: number): Calibration {
+    const cur = this.cal ?? {
+      rest: [0, 1, 2, 3].map(() => this.cfg.defaultRest),
+      mvc: [0, 1, 2, 3].map(() => this.cfg.defaultMvc),
+      ok: true,
+      problems: [],
+    };
+    const c = raiseMvc(cur, windows, { percentile, config: this.cfg });
+    this.setCalibration(c);
+    return c;
   }
 
   getCalibration(): Calibration | null {
