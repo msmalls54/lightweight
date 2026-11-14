@@ -6,7 +6,7 @@
   "version": "0.1.0",
   "description": "Lightweight: EMG receiver, signal engine, dashboard, Gemini voice coach and MCP tools",
   "scripts": {
-    "dev": "mcp-use dev",
+    "dev": "mcp-use dev --no-open --no-hmr",
     "start": "mcp-use start",
     "build": "tsc --noEmit && mcp-use build --with-inspector --inline --no-typecheck",
     "typecheck": "tsc --noEmit",
