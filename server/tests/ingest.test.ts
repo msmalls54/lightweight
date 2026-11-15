@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { Store } from "../src/store.js";
 import { Hub } from "../src/hub.js";
-import { Pipeline, trimIngested } from "../src/pipeline.js";
+import { Pipeline, trimIngested, updateLag, type LagWindow } from "../src/pipeline.js";
 import { addGuard, addReceiver } from "../src/receiver.js";
 
 const DT = 5;
@@ -130,4 +130,17 @@ test("trimIngested: reboot rules (seq forward + clock back, old firmware seq res
   assert.equal(trimIngested(b(0, 100), 100_000, 499).reset, true); // old firmware: seq back to 0
   assert.equal(trimIngested(b(450, 92_000), 100_000, 499).batch, null); // a queued resend 8 s back is not a reboot
   assert.equal(trimIngested(b(10, 1_000), 30_000, 140).reset, true); // clock 29 s back
+});
+
+test("lag baseline is a sliding window: clock drift stays near 0, a real 3 s backlog shows ~3 s", () => {
+  // 30 min at 5 POSTs/s, the device clock running 50 ms/min slow vs the laptop (offset grows 1.5 s total).
+  const win: LagWindow = [];
+  let lag = 0;
+  for (let ms = 0; ms <= 30 * 60_000; ms += 200) lag = updateLag(win, 50 + (ms / 60_000) * 50 + (ms % 1000 === 0 ? 30 : 0), 1_000_000 + ms);
+  assert.ok(lag < 150, `drift read as ${lag} ms of lag`);
+  assert.ok(win.length <= 7, "window stays bounded");
+  // then a real backlog builds over 5 s: the newest samples arrive 3 s late
+  const t1 = 1_000_000 + 30 * 60_000;
+  for (let k = 1; k <= 25; k++) lag = updateLag(win, 50 + 1500 + (3000 * k) / 25, t1 + k * 200);
+  assert.ok(Math.abs(lag - 3000) < 200, `backlog read as ${lag} ms`);
 });
