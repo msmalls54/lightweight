@@ -122,9 +122,14 @@
     if (mapOn()) return;
     pctArr.forEach((v, i) => {
       if (v == null || !isFinite(v)) return;
-      restEst[i] = restEst[i] == null ? v : restEst[i] + 0.1 * (v - restEst[i]); // ~2 s at 5 Hz
+      // Follow the resting level quickly (~2 s at 5 Hz), but rise very slowly on a clear flex (~50 s),
+      // so a pre-set flex still shows on the body.
+      const d = restEst[i] == null ? 0 : v - restEst[i];
+      restEst[i] = restEst[i] == null ? v : restEst[i] + (d > 0.08 ? 0.004 : 0.1) * d;
     });
   }
+  /** Idle: stay gray at rest, but show a clear flex (above the resting level by a margin). */
+  function idleLevel(i, v) { const l = mapLevel(i, v); return l > 0.12 ? l : 0; }
   function mapLevel(i, v) {
     const r = Math.max(0, Math.min(0.8, restEst[i] ?? 0));
     return Math.max(0, Math.min(1, (v - r) / (1 - r)));
@@ -146,7 +151,8 @@
     });
     for (const arm of ["R", "L"]) meters[arm].classList.toggle("off", !activeArms.includes(arm));
     CH_INFO.forEach((c, i) => {
-      const lvl = stale || !mapOn() || !activeArms.includes(i < 2 ? "R" : "L") ? 0 : mapLevel(i, live[i] || 0);
+      const lvl = stale || !activeArms.includes(i < 2 ? "R" : "L") ? 0
+        : mapOn() ? mapLevel(i, live[i] || 0) : idleLevel(i, live[i] || 0);
       for (const p of mapShapes[`${c.muscle}/${c.side}`] || []) p.setAttribute("fill", heat(lvl));
     });
     requestAnimationFrame(frame);
