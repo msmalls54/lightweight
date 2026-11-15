@@ -18,6 +18,6 @@ Narration is read over the clips. Each beat lists what is on screen. Word count:
 - 4 MyoWare 2.0 EMG sensors, 200 Hz, Arduino UNO R4 WiFi, phone hotspot. Relative muscle activation only: not force, not medical.
 - Cheat rule: shoulder/biceps on the way up, compared with the lifter's own clean reps. Code flags; Gemini words it.
 - Voice: Gemini TTS (voice Alnilam), 57 pre-generated clips for instant call-outs. Brain: Gemini 4 Hydrogen.
-- Gemma: dataset v2 = 2,428 reps (85 real, 2,343 synthetic); synthetic-only training scored 0.96 accuracy on the real reps; few-shot Gemma kept the code's verdict on 17 of 20. Nothing is fine-tuned.
+- Gemma: dataset v2 = 2,428 reps (85 real, 2,343 synthetic); synthetic-only training scored 0.96 accuracy on the 26 real test reps; few-shot Gemma kept the code's verdict on 18 of 20. Nothing is fine-tuned.
 - MCP: 10 tools and a muscle-map widget, verified in Claude through a custom connector.
 - Lift library: curls live today; other lifts are "config ready, not yet tested".
