@@ -9,7 +9,7 @@
 - [x] GitHub repo is public and `main` has no unpushed commits (local HEAD = origin/main at check time)
 
 ## Still missing
-- [x] **Video demo link:** https://youtu.be/LKebmjxAbvU (in the README; paste it into Devpost's video field)
+- [x] **Video demo link:** https://youtu.be/IrWhJGBbjtQ (in the README; paste it into Devpost's video field)
 - [ ] **Devpost link** from the organizers, then create the project and join the VexoHacks hackathon
 - [ ] `docs/submission/` is not committed (nothing was committed or pushed by this pass)
 - [ ] `data/coach/history/2026-11-14.json` is untracked (was already so before this pass); commit it if today's history should be in the repo
