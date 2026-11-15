@@ -2,7 +2,7 @@
 
 **A wearable that lets an AI coach feel your muscles and call out your cheat reps out loud.**
 
-**Demo video (1:41):** https://youtu.be/9WVd2LuDzkw
+**Demo video (1:46):** https://youtu.be/LKebmjxAbvU
 
 ![Lightweight: rep 5 flagged, the left front delt took over](docs/submission/cover-1500x1000.png)
 <sub>Rep 5 of a real set: four clean reps, then the left front delt takes over and the rep is flagged.</sub>

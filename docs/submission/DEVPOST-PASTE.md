@@ -101,7 +101,7 @@ Original line from `docs/DEVPOST.md`, for reference:
 
 ## 6. "Try it out" links
 - GitHub: https://github.com/msmalls54/lightweight
-- Video demo: https://youtu.be/9WVd2LuDzkw
+- Video demo: https://youtu.be/LKebmjxAbvU
 
 ## 7. Tracks / prizes to select
 
