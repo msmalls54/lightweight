@@ -90,7 +90,21 @@ interface Sess {
 }
 
 /** Per device: the newest sample time ingested (device ms), and the smallest receive-minus-device offset. */
-interface DeviceTrack { endT: number; lastSeq: number; minOffset: number; lagMs: number; at: number }
+interface DeviceTrack { endT: number; lastSeq: number; lag: LagWindow; lagMs: number; at: number }
+
+/** Lag baseline = the smallest receive-minus-device offset over the last ~60 s (6 buckets of 10 s), not
+ *  since boot: the UNO's clock drifts ~50 ms/min against the laptop's, which an all-time minimum turns
+ *  into a fake, ever-growing lag. A real backlog grows within seconds, so it still shows. */
+export const LAG_WINDOW = { bucketMs: 10_000, buckets: 6 } as const;
+export type LagWindow = { start: number; min: number }[];
+export function updateLag(win: LagWindow, offset: number, now: number): number {
+  const start = now - (now % LAG_WINDOW.bucketMs);
+  const last = win[win.length - 1];
+  if (last && last.start === start) last.min = Math.min(last.min, offset);
+  else win.push({ start, min: offset });
+  while (win.length && win[0].start <= now - LAG_WINDOW.bucketMs * LAG_WINDOW.buckets) win.shift();
+  return offset - Math.min(...win.map(b => b.min));
+}
 
 /**
  * Coalesced POSTs and resends: drop the part of a batch that was already ingested (by device time, so a
@@ -162,8 +176,9 @@ export class Pipeline {
     // The tracker advances even when the DB already has the batch (a resend from before a server
     // restart), so a stored duplicate can never stall the device.
     const endT = b.t0_ms + b.ch[0].length * b.dt_ms, offset = now - endT;
-    const minOffset = !dev || reset ? offset : Math.min(dev.minOffset, offset);
-    this.devices.set(b.device, { endT: Math.max(reset || !dev ? endT : dev.endT, endT), lastSeq: reset || !dev ? lastB : Math.max(dev.lastSeq, lastB), minOffset, lagMs: offset - minOffset, at: now });
+    const lag: LagWindow = !dev || reset ? [] : dev.lag; // a reboot restarts the device clock: new baseline
+    const lagMs = updateLag(lag, offset, now);
+    this.devices.set(b.device, { endT: Math.max(reset || !dev ? endT : dev.endT, endT), lastSeq: reset || !dev ? lastB : Math.max(dev.lastSeq, lastB), lag, lagMs, at: now });
     const id = this.store.saveBatch(sess.id, b);
     if (id === null) return { duplicate: true };
     sess.lastBatchId = id;
