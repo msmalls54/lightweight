@@ -4,7 +4,7 @@
 
 Demo video: _TODO: link_
 
-![Dashboard during a fake-device run: rep 6 flagged, "DELT TOOK OVER"](docs/dashboard-fake-device.jpg)
+![Lightweight: rep 5 flagged, the left front delt took over](docs/submission/cover-1500x1000.png)
 <sub>Dashboard during a no-hardware run (`scripts/fake-device.ts`, synthetic data): 5 clean curls, then the swing on rep 6 gets flagged.</sub>
 
 ## What it does
