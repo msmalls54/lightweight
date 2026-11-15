@@ -1,6 +1,6 @@
 # Lightweight
 
-**A wearable that lets an AI coach feel your muscles and call out your cheat reps out loud. Try to beat it.**
+**A wearable that lets an AI coach feel your muscles and call out your cheat reps out loud.**
 
 Demo video: _TODO: link_
 
