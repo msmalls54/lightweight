@@ -2,6 +2,8 @@
 
 **A wearable that lets an AI coach feel your muscles and call out your cheat reps out loud.**
 
+**3rd place, Google DeepMind track (Best Use of Gemini 4), VexoHacks 2026.** 48 projects entered the track.
+
 **Demo video (1:51):** https://youtu.be/IrWhJGBbjtQ
 
 ![Lightweight: rep 5 flagged, the left front delt took over](docs/submission/cover-1500x1000.png)
@@ -28,6 +30,14 @@ Three real recordings, replayed through the engine in `server/tests/engine-real.
 | Nov 14, 35 lb dumbbells, both arms | 7 reps, **0 flagged** | 6 reps, **5 flagged** | right delt mean %MVC: 0.45–0.52 strict vs 0.75–0.86 swing |
 
 Why the up phase: on heavy strict curls the front delt works too, but mostly on the way *down*, to hold the shoulder still. A swing fires it on the way *up*. Whole-rep numbers blur the two under load (35 lb: delt share 0.35–0.46 strict vs 0.51–0.54 swing). The up-phase ratio separates them (worst strict rep 1.08× its reference, weakest swing 1.47×, threshold 1.35×). The swings that weren't flagged were light swings at strict-level delt effort. Details: [`server/src/engine/README.md`](server/src/engine/README.md).
+
+## Why the data matters
+
+Most AI coaching is trained on text: articles, textbooks and forum posts about how a lift should look. Lightweight produces something different: measurements of what a real body did.
+
+Every rep is stored as a labelled example: four muscle channels at 200 Hz, the up and down phase, tempo, left against right, and a clean or cheat verdict from code. Every raw batch is kept, so any session can be replayed or re-labelled later.
+
+That is training data, not reference material. `data/dataset/v2/` holds 2,428 reps (85 real, 2,343 synthetic from a generator fitted to the real ones) plus chat-format files ready for a Gemma fine-tune. A classifier trained on the synthetic reps alone scored 0.96 accuracy on the real test reps. Nothing is fine-tuned yet, and the real reps so far come from one person and one lift; the dataset and baseline are the starting point, and it grows with every set anyone lifts.
 
 ## Architecture
 
@@ -110,4 +120,4 @@ The server only accepts `/ingest` and `/heartbeat` from the network (the UNO). E
 
 ## Built at VexoHacks
 
-Built solo in one day at **VexoHacks, November 14, 2026**, with **Claude Code** (parallel sessions for firmware, signal engine, server and voice/coach) and **Google Gemini** (Gemini 4 Hydrogen for the coach, Gemini TTS for the voice, with ElevenLabs as a fallback voice and for the demo video's narration). Muscle-map body art is from [react-body-highlighter](https://github.com/GV79/react-body-highlighter) (MIT, license in `assets/muscle-map/`).
+Built solo in one day at **VexoHacks, November 14, 2026**, where it placed **3rd in the Google DeepMind track** (Best Use of Gemini 4). Built with **Claude Code** (parallel sessions for firmware, signal engine, server and voice/coach) and **Google Gemini** (Gemini 4 Hydrogen for the coach, Gemini TTS for the voice, with ElevenLabs as a fallback voice and for the demo video's narration). Muscle-map body art is from [react-body-highlighter](https://github.com/GV79/react-body-highlighter) (MIT, license in `assets/muscle-map/`).
